@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>PdfInvoiceToXml</AssemblyName>
+    <RootNamespace>PdfInvoiceToXml</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- If restore fails on this exact version, bump it: dotnet add package PdfPig -->
+    <PackageReference Include="PdfPig" Version="0.1.8" />
+  </ItemGroup>
+
+</Project>
