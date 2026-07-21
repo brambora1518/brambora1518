@@ -12,8 +12,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- If restore fails on this exact version, bump it: dotnet add package PdfPig -->
+    <!-- If restore fails on any of these exact versions, bump it, e.g.: dotnet add package PdfPig -->
     <PackageReference Include="PdfPig" Version="0.1.8" />
+    <!-- Renders a PDF page to a bitmap - used as OCR fallback for scanned/image-only PDFs -->
+    <PackageReference Include="PDFtoImage" Version="5.2.1" />
+    <!-- OCR engine wrapper (SkiaSharp comes in transitively via PDFtoImage) -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Czech (and optionally other) Tesseract trained-data files go here - see tessdata/README.txt -->
+    <None Include="tessdata\**\*.traineddata" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

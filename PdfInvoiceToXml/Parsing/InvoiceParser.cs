@@ -36,10 +36,28 @@ public static class InvoiceParser
     public static InvoiceData Parse(string pdfPath)
     {
         var lines = PdfTextExtractor.ExtractLines(pdfPath);
+        var usedOcr = false;
+
         if (lines.Count == 0)
         {
-            throw new InvalidOperationException(
-                "V PDF se nenašel žádný text – jde pravděpodobně o naskenovaný obrázek bez textové vrstvy (OCR), který tento nástroj neumí přečíst.");
+            // No text layer at all - most likely a scanned/"printed to image" PDF.
+            // Fall back to rendering the page and running OCR over it.
+            var tessDataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
+            if (!File.Exists(Path.Combine(tessDataPath, "ces.traineddata")))
+            {
+                throw new InvalidOperationException(
+                    "V PDF se nenašel žádný text (jde o naskenovaný/obrázkový dokument) a chybí OCR data. " +
+                    "Stáhněte ces.traineddata podle tessdata/README.txt a umístěte ho vedle .exe do složky tessdata.");
+            }
+
+            lines = OcrTextExtractor.ExtractLines(pdfPath, tessDataPath);
+            usedOcr = true;
+
+            if (lines.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "V PDF se nenašel žádný text ani pomocí OCR - dokument se nepodařilo rozpoznat.");
+            }
         }
 
         var itemsHeaderIdx = lines.FindIndex(l =>
@@ -64,6 +82,7 @@ public static class InvoiceParser
             VariableSymbol = Match1(headerText, @"[Vv]ariabiln\S*\s+symbol\s*:?\s*(\d+)") ?? "",
             PaymentType = MapPaymentType(Match1(headerText, @"[ZF]orm\S*\s+[úu]hrady\s*:?\s*([\w.]+)")),
             TextAbove = Match1(fullText, @"(TATO FAKTURA[^\n]*)") ?? "",
+            WasOcr = usedOcr,
         };
 
         var account = Regex.Match(headerText, @"[ČC]íslo\s+[úu][čc]tu\s*:?\s*([\d\-]+)\s*/\s*(\d{3,4})");

@@ -81,6 +81,10 @@ public class MainForm : Form
             }
 
             Log($"OK: {Path.GetFileName(pdfPath)} -> {Path.GetFileName(outputPath)}");
+            if (invoice.WasOcr)
+            {
+                Log("  POZOR: PDF nemělo textovou vrstvu, data se četla přes OCR - zkontrolujte prosím čísla (částky, IČO/DIČ, data) v XML ručně.");
+            }
         }
         catch (Exception ex)
         {

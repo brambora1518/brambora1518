@@ -58,6 +58,9 @@ public class InvoiceData
     public bool ReverseCharge { get; set; }
     public string TextAbove { get; set; } = "";
 
+    /// <summary>True when the data came from OCR (scanned/image-only PDF) rather than a real text layer - numbers deserve a manual check.</summary>
+    public bool WasOcr { get; set; }
+
     /// <summary>Total without VAT, summed across VAT-rate rows.</summary>
     public decimal NetTotal => VatTable.Sum(v => v.TaxableTotal);
 
