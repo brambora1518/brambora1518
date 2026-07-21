@@ -1,0 +1,7 @@
+editable .PDF --> .XML working
+non-editable .PDF --> .XML not working???
+
+
+https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/sdk-8.0.423-windows-x64-installer
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true [.exe release (debug before doin ts) ]
+.XML files are saving to same path u gettin yo .PDF file --> e.g. u have yo bitchass .PDF file at "C:\Users\ninad\Desktop\PdfInvoiceToXml" , so yo dumbass .XML file will be saved in the same folder
