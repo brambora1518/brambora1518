@@ -10,29 +10,12 @@ namespace PdfInvoiceToXml.Parsing;
 /// Číslo/Název zboží/DPH/Jedn./MNOŽSTVÍ/PC bez DPH/DPH celkem/ČÁSTKA columns),
 /// but relies on commonly-used Czech invoice labels rather than fixed
 /// coordinates, so it should tolerate reasonably similar layouts from other
-/// accounting systems too. Genuinely different layouts (e.g. no two-column
-/// DODAVATEL/ODBĚRATEL header, or a differently labelled items table) may
-/// need the column-alias lists below extended.
+/// accounting systems too. Label/value gaps use lazy, digit-tolerant regexes
+/// throughout because OCR (see <see cref="OcrTextExtractor"/>) sometimes
+/// misreads a colon as a stray digit.
 /// </summary>
 public static class InvoiceParser
 {
-    // Order matters: more specific (multi-word) labels must be checked before
-    // shorter labels they happen to contain as a substring (e.g. "DPH celkem"
-    // and "PC bez DPH" both contain "dph", which alone means the VAT-rate
-    // column - so the compound labels are listed first).
-    private static readonly (string[] Keys, string Field)[] ItemColumnAliases =
-    {
-        (new[] { "dph celkem" }, "VatAmount"),
-        (new[] { "pc bez dph", "cena bez dph" }, "UnitPrice"),
-        (new[] { "číslo", "cislo" }, "Number"),
-        (new[] { "název", "nazev", "položka", "polozka", "popis" }, "Name"),
-        (new[] { "dph", "sazba" }, "VatRate"),
-        (new[] { "jedn" }, "Unit"),
-        (new[] { "množství", "mnozstvi" }, "Quantity"),
-        (new[] { "částka", "castka" }, "Amount"),
-        (new[] { "pozn" }, "Note"),
-    };
-
     public static InvoiceData Parse(string pdfPath)
     {
         var lines = PdfTextExtractor.ExtractLines(pdfPath);
@@ -71,21 +54,21 @@ public static class InvoiceParser
 
         var invoice = new InvoiceData
         {
-            DocumentId = Match1(headerText, @"DOKLAD\s*:?\s*([\w/\-]+)")
-                         ?? Match1(headerText, @"FAKTURA\s*(?:č\.?|číslo)?\s*:?\s*([\w/\-]+)")
+            DocumentId = Match1(headerText, @"DOKLAD.{0,5}?([\w/\-]+)")
+                         ?? Match1(headerText, @"FAKTURA\s*(?:č\.?|číslo)?.{0,5}?([\w/\-]+)")
                          ?? "",
             Supplier = ParseParty(leftText, isSupplier: true),
             Buyer = ParseParty(rightText, isSupplier: false),
             IssueDate = FindDate(headerText, @"Datum\s+vystaven\S*\s+dokladu"),
             VatDate = FindDate(headerText, @"Datum\s+uskut\S*"),
             DueDate = FindDate(headerText, @"[Ss]platnosti"),
-            VariableSymbol = Match1(headerText, @"[Vv]ariabiln\S*\s+symbol\s*:?\s*(\d+)") ?? "",
-            PaymentType = MapPaymentType(Match1(headerText, @"[ZF]orm\S*\s+[úu]hrady\s*:?\s*([\w.]+)")),
+            VariableSymbol = Match1(headerText, @"[Vv]ariabiln\S*\s+symbol.{0,10}?(\d{3,})") ?? "",
+            PaymentType = MapPaymentType(Match1(headerText, @"[ZF]orm\S*\s+[úu]hrady.{0,10}?([\w.]+)")),
             TextAbove = Match1(fullText, @"(TATO FAKTURA[^\n]*)") ?? "",
             WasOcr = usedOcr,
         };
 
-        var account = Regex.Match(headerText, @"[ČC]íslo\s+[úu][čc]tu\s*:?\s*([\d\-]+)\s*/\s*(\d{3,4})");
+        var account = Regex.Match(headerText, @"[ČC]íslo\s+[úu][čc]tu.{0,10}?([\d\-]{5,})\s*/\s*(\d{3,4})");
         if (account.Success)
         {
             invoice.BankAccount = account.Groups[1].Value;
@@ -98,9 +81,12 @@ public static class InvoiceParser
         var totalLine = lines.FirstOrDefault(l =>
             l.Text.Contains("CELKEM", StringComparison.OrdinalIgnoreCase) &&
             Regex.IsMatch(l.Text, "[ÚU]HRAD", RegexOptions.IgnoreCase));
-        var totalMatch = totalLine != null ? Regex.Match(totalLine.Text, @"(\d[\d.,\s]*\d)\s*$") : Match.Empty;
-        invoice.RoundedGrandTotal = totalMatch.Success
-            ? ParseCzDecimal(totalMatch.Groups[1].Value)
+        // Take the *last* number-shaped token on the line rather than anchoring
+        // to the end of the string - OCR sometimes appends stray junk after
+        // the amount (logos, QR-code labels, ...).
+        var numberTokens = totalLine != null ? Regex.Matches(totalLine.Text, @"\d[\d.,]*\d|\d") : null;
+        invoice.RoundedGrandTotal = numberTokens is { Count: > 0 }
+            ? ParseCzDecimal(numberTokens[^1].Value)
             : Math.Round(invoice.VatTable.Sum(v => v.TotalWithVat), 0, MidpointRounding.AwayFromZero);
 
         invoice.IsTaxVoucher = fullText.Contains("DAŇOV", StringComparison.OrdinalIgnoreCase);
@@ -126,22 +112,34 @@ public static class InvoiceParser
         return (string.Join("\n", left), string.Join("\n", right));
     }
 
+    // Stray characters OCR tends to hallucinate around table borders/boxes
+    // (vertical dividers, box corners) - stripped from both ends of every line.
+    private static readonly char[] LineNoiseChars = { ' ', '|', '[', ']', '(', ')', '{', '}', '!', '"', '\'' };
+
     private static PartyInfo ParseParty(string blockText, bool isSupplier)
     {
         var party = new PartyInfo { State = "CZ" };
 
-        var ico = Match1(blockText, @"I[ČC]O\s*:?\s*(\d{6,10})");
-        var dic = Match1(blockText, @"DI[ČC]\s*:?\s*([A-Z]{0,2}\d{6,12})");
+        var ico = Match1(blockText, @"I[ČC]O.{0,5}?(\d{6,10})");
+        var dic = Match1(blockText, @"DI[ČC].{0,5}?([A-Z]{0,2}\d{6,12})");
         party.RegistrationNo = ico ?? "";
         party.TaxRegistrationNo = dic ?? "";
         party.VatPayer = !string.IsNullOrEmpty(dic);
 
-        var lines = blockText
+        var allLines = blockText
             .Split('\n')
-            .Select(l => l.Trim())
+            .Select(l => l.Trim(LineNoiseChars))
             .Where(l => l.Length > 0)
-            .Where(l => !Regex.IsMatch(l, @"^(DODAVATEL|ODB[ĚE]RATEL)\s*:?\s*$", RegexOptions.IgnoreCase))
             .ToList();
+
+        // Only look at what comes *after* the DODAVATEL/ODBĚRATEL label itself,
+        // so an unrelated line above it (e.g. the invoice title) in the same
+        // column can't be mistaken for the party's name. Matched loosely
+        // (Contains, not a whole-line match) since OCR often leaves stray
+        // characters stuck to the label.
+        var labelPattern = isSupplier ? "DODAVATEL" : "ODB[ĚE]RATEL";
+        var labelIdx = allLines.FindIndex(l => Regex.IsMatch(l, labelPattern, RegexOptions.IgnoreCase));
+        var lines = labelIdx >= 0 ? allLines.Skip(labelIdx + 1).ToList() : allLines;
 
         var zipLineIdx = lines.FindIndex(l => Regex.IsMatch(l, @"^\d{3}\s?\d{2}\s+\S"));
 
@@ -219,33 +217,23 @@ public static class InvoiceParser
         return result;
     }
 
+    // Column X-position anchoring turned out to be too fragile once OCR is
+    // involved: OCR often merges adjacent header labels ("PC bez DPH" ->
+    // "PCbezDPH") or drops one entirely, so the header row can't reliably be
+    // used to locate columns. Instead each item row is parsed from its own
+    // token shapes, right to left: Amount, VATAmount, UnitPrice and Quantity
+    // are the trailing numeric tokens; before them comes Unit (short word)
+    // then VAT rate ("21%"); everything else between the leading item number
+    // and that block is the item name. This works the same whether the line
+    // came from real PDF text or from OCR.
+    private static readonly Regex NumericTokenPattern = new(@"^-?\d[\d.,]*-?$");
+    private static readonly Regex VatRateTokenPattern = new(@"^\d{1,2}%$");
+    private static readonly Regex UnitTokenPattern = new(@"^\p{L}{1,6}\.?$");
+    private static readonly Regex TableNoisePattern = new(@"^[|\[\](){}]+$");
+
     private static List<InvoiceItem> ExtractItems(List<PdfLine> lines, int headerIdx)
     {
         var items = new List<InvoiceItem>();
-        var headerLine = lines[headerIdx];
-
-        // Merge adjacent words into header "cells" first (column labels like
-        // "DPH celkem" or "Název zboží" are printed as 2+ separate PDF words
-        // with normal spacing; a real column boundary leaves a much wider gap).
-        var cells = GroupHeaderCells(headerLine.Words);
-
-        var anchors = new List<(double X, string Field)>();
-        foreach (var (x, text) in cells)
-        {
-            var lw = text.ToLowerInvariant();
-            var field = ItemColumnAliases
-                .Where(a => a.Keys.Any(k => lw.Contains(k)))
-                .Select(a => a.Field)
-                .FirstOrDefault();
-
-            if (field != null && anchors.All(a => a.Field != field))
-            {
-                anchors.Add((x, field));
-            }
-        }
-
-        if (anchors.Count < 3) return items;
-        anchors = anchors.OrderBy(a => a.X).ToList();
 
         for (var i = headerIdx + 1; i < lines.Count; i++)
         {
@@ -254,72 +242,87 @@ public static class InvoiceParser
             if (text.Length == 0) continue;
             if (Regex.IsMatch(text, @"^(CELKEM|SLEVA)\b", RegexOptions.IgnoreCase)) break;
 
-            var firstWord = line.Words.FirstOrDefault()?.Text ?? "";
-            if (!Regex.IsMatch(firstWord, @"^\d+$")) continue;
+            var tokens = line.Words
+                .Select(w => w.Text)
+                .Where(t => !TableNoisePattern.IsMatch(t))
+                .ToList();
 
-            var columns = anchors.ToDictionary(a => a.Field, _ => new List<string>());
-
-            foreach (var word in line.Words)
+            // OCR sometimes misreads the table's vertical divider lines as a
+            // stray single letter (e.g. "l" or "I") rather than "|", leaving
+            // one extra bogus token in front of the real item number.
+            if (tokens.Count >= 2 && tokens[0].Length == 1 &&
+                !Regex.IsMatch(tokens[0], @"^\d$") && Regex.IsMatch(tokens[1], @"^\d+$"))
             {
-                var field = anchors[0].Field;
-                for (var a = 0; a < anchors.Count; a++)
-                {
-                    var upperBound = a + 1 < anchors.Count
-                        ? (anchors[a].X + anchors[a + 1].X) / 2
-                        : double.MaxValue;
-                    if (word.Left < upperBound)
-                    {
-                        field = anchors[a].Field;
-                        break;
-                    }
-                }
-                columns[field].Add(word.Text);
+                tokens.RemoveAt(0);
             }
 
-            string Get(string f) => columns.TryGetValue(f, out var v) ? string.Join(" ", v) : "";
+            if (tokens.Count == 0 || !Regex.IsMatch(tokens[0], @"^\d+$")) continue;
 
-            items.Add(new InvoiceItem
-            {
-                Number = Get("Number"),
-                Name = Get("Name"),
-                VatRate = ParseCzDecimal(Regex.Match(Get("VatRate"), @"\d+").Value),
-                Unit = Get("Unit"),
-                Quantity = ParseCzDecimal(Get("Quantity")),
-                UnitPriceNoVat = ParseCzDecimal(Get("UnitPrice")),
-                VatAmount = ParseCzDecimal(Get("VatAmount")),
-                Amount = ParseCzDecimal(Get("Amount")),
-                Note = Get("Note")
-            });
+            items.Add(ParseItemRow(tokens));
         }
 
         return items;
     }
 
-    private static List<(double X, string Text)> GroupHeaderCells(List<PdfWord> words)
+    private static InvoiceItem ParseItemRow(List<string> tokens)
     {
-        var cells = new List<(double X, string Text)>();
-        if (words.Count == 0) return cells;
+        var number = tokens[0];
+        var rest = tokens.Skip(1).ToList();
 
-        var cellX = words[0].Left;
-        var cellWords = new List<string> { words[0].Text };
-        var prevRight = words[0].Right;
-
-        for (var i = 1; i < words.Count; i++)
+        // A trailing run of non-numeric tokens (if any) is the note column.
+        var noteTokens = new List<string>();
+        while (rest.Count > 0 && !NumericTokenPattern.IsMatch(rest[^1]))
         {
-            var w = words[i];
-            if (w.Left - prevRight > 8.0)
-            {
-                cells.Add((cellX, string.Join(" ", cellWords)));
-                cellX = w.Left;
-                cellWords = new List<string>();
-            }
-
-            cellWords.Add(w.Text);
-            prevRight = w.Right;
+            noteTokens.Insert(0, rest[^1]);
+            rest.RemoveAt(rest.Count - 1);
         }
 
-        cells.Add((cellX, string.Join(" ", cellWords)));
-        return cells;
+        // Up to 4 trailing numeric tokens: Quantity, UnitPrice, VATAmount, Amount (left to right).
+        var trailing = new List<string>();
+        var idx = rest.Count - 1;
+        while (idx >= 0 && trailing.Count < 4 && NumericTokenPattern.IsMatch(rest[idx]))
+        {
+            trailing.Insert(0, rest[idx]);
+            idx--;
+        }
+        while (trailing.Count < 4) trailing.Insert(0, "");
+
+        var unit = "";
+        if (idx >= 0 && UnitTokenPattern.IsMatch(rest[idx]) && !VatRateTokenPattern.IsMatch(rest[idx]))
+        {
+            unit = rest[idx];
+            idx--;
+        }
+
+        var vatRateRaw = "";
+        if (idx >= 0)
+        {
+            if (VatRateTokenPattern.IsMatch(rest[idx]))
+            {
+                vatRateRaw = rest[idx];
+                idx--;
+            }
+            else if (rest[idx] == "%" && idx - 1 >= 0 && Regex.IsMatch(rest[idx - 1], @"^\d{1,2}$"))
+            {
+                vatRateRaw = rest[idx - 1] + "%";
+                idx -= 2;
+            }
+        }
+
+        var name = string.Join(" ", rest.Take(idx + 1));
+
+        return new InvoiceItem
+        {
+            Number = number,
+            Name = name,
+            VatRate = ParseCzDecimal(Regex.Match(vatRateRaw, @"\d+").Value),
+            Unit = unit,
+            Quantity = ParseCzDecimal(trailing[0]),
+            UnitPriceNoVat = ParseCzDecimal(trailing[1]),
+            VatAmount = ParseCzDecimal(trailing[2]),
+            Amount = ParseCzDecimal(trailing[3]),
+            Note = string.Join(" ", noteTokens)
+        };
     }
 
     private static string MapPaymentType(string? raw)
@@ -340,7 +343,11 @@ public static class InvoiceParser
 
     private static DateTime? FindDate(string text, string keywordPattern)
     {
-        var m = Regex.Match(text, keywordPattern + @"[^\d\n]{0,20}(\d{1,2}\.\d{1,2}\.\d{2,4})", RegexOptions.IgnoreCase);
+        // Lazy, digit-tolerant gap: OCR sometimes misreads the ":" after a
+        // label as a stray digit, so a gap that forbids digits (like
+        // "[^\d]*") can fail to bridge across it. Laziness still keeps the
+        // match anchored to the *nearest* date after the keyword.
+        var m = Regex.Match(text, keywordPattern + @".{0,25}?(\d{1,2}\.\d{1,2}\.\d{2,4})", RegexOptions.IgnoreCase);
         return m.Success ? ParseCzDate(m.Groups[1].Value) : null;
     }
 
@@ -357,7 +364,11 @@ public static class InvoiceParser
     {
         if (string.IsNullOrWhiteSpace(s)) return 0m;
         var cleaned = s.Replace(" ", "").Replace("Kč", "", StringComparison.OrdinalIgnoreCase).Trim();
-        cleaned = cleaned.Replace(",-", ",00"); // Czech "no decimals" notation, e.g. "171,-"
+        // Czech "no decimals" notation, e.g. "171,-" - OCR sometimes drops the
+        // comma too ("171-"), so strip a trailing dash outright rather than
+        // only the ",-" pair.
+        cleaned = Regex.Replace(cleaned, @"-$", "");
+        cleaned = Regex.Replace(cleaned, @"[.,]$", "");
         cleaned = Regex.Replace(cleaned, @"\.(?=\d{3}(\D|$))", "");
         cleaned = cleaned.Replace(",", ".");
         cleaned = Regex.Replace(cleaned, @"[^\d.\-]", "");
