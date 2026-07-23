@@ -98,7 +98,7 @@ public class MainForm : Form
         var subtitle = new Label
         {
             AutoSize = true,
-            Text = "Převod PDF faktury do formátu KASTNER IMPORT (XML)",
+            Text = "Automatický převod PDF faktury do XML",
             Font = new Font("Segoe UI", 9f),
             ForeColor = MutedColor,
             Location = new Point(20, 44)
