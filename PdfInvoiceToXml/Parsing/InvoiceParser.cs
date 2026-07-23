@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using PdfInvoiceToXml.Models;
 
@@ -134,11 +135,11 @@ public static class InvoiceParser
 
         // Only look at what comes *after* the DODAVATEL/ODBĚRATEL label itself,
         // so an unrelated line above it (e.g. the invoice title) in the same
-        // column can't be mistaken for the party's name. Matched loosely
-        // (Contains, not a whole-line match) since OCR often leaves stray
-        // characters stuck to the label.
-        var labelPattern = isSupplier ? "DODAVATEL" : "ODB[ĚE]RATEL";
-        var labelIdx = allLines.FindIndex(l => Regex.IsMatch(l, labelPattern, RegexOptions.IgnoreCase));
+        // column can't be mistaken for the party's name. Matched fuzzily
+        // (edit distance, not exact regex) since OCR can garble the label
+        // beyond simple punctuation noise (e.g. "ODBĚRATEL" -> "ovBĚRArEL").
+        var labelTarget = isSupplier ? "DODAVATEL" : "ODBERATEL";
+        var labelIdx = allLines.FindIndex(l => LooksLikeLabel(l, labelTarget));
         var lines = labelIdx >= 0 ? allLines.Skip(labelIdx + 1).ToList() : allLines;
 
         var zipLineIdx = lines.FindIndex(l => Regex.IsMatch(l, @"^\d{3}\s?\d{2}\s+\S"));
@@ -161,9 +162,11 @@ public static class InvoiceParser
 
         nameLines = nameLines
             .Where(l => !Regex.IsMatch(l, @"^(I[ČC]O|DI[ČC]|Tel|Email|E-?mail)\s*:", RegexOptions.IgnoreCase))
+            .Select(TrimLeadingNoise)
+            .Where(l => l.Length > 0)
             .ToList();
 
-        party.Street = street;
+        party.Street = TrimLeadingNoise(street);
         party.City = city;
         party.PostalCode = zip;
 
@@ -185,6 +188,53 @@ public static class InvoiceParser
 
         return party;
     }
+
+    // Fuzzy label match: strips everything but letters, removes diacritics,
+    // and allows a small edit distance so a badly-OCR'd label (a couple of
+    // misread characters) still gets recognised.
+    private static bool LooksLikeLabel(string line, string target)
+    {
+        var letters = RemoveDiacritics(new string(line.Where(char.IsLetter).ToArray())).ToUpperInvariant();
+        if (letters.Length == 0) return false;
+        var window = letters.Length > target.Length ? letters[..target.Length] : letters;
+        var maxDistance = target.Length >= 8 ? 2 : 1;
+        return LevenshteinDistance(window, target) <= maxDistance;
+    }
+
+    private static string RemoveDiacritics(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder();
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static int LevenshteinDistance(string a, string b)
+    {
+        var dp = new int[a.Length + 1, b.Length + 1];
+        for (var i = 0; i <= a.Length; i++) dp[i, 0] = i;
+        for (var j = 0; j <= b.Length; j++) dp[0, j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                dp[i, j] = Math.Min(Math.Min(dp[i - 1, j] + 1, dp[i, j - 1] + 1), dp[i - 1, j - 1] + cost);
+            }
+        }
+
+        return dp[a.Length, b.Length];
+    }
+
+    // Real street/city/company text always starts with a letter or digit -
+    // strips a leading run of stray punctuation OCR sometimes bleeds in from
+    // an adjacent line (e.g. a trailing ":" from the label line above).
+    private static string TrimLeadingNoise(string s) => Regex.Replace(s.Trim(), @"^[^\p{L}\d]+", "");
 
     private static List<VatRateSummary> ExtractVatTable(List<PdfLine> lines)
     {
