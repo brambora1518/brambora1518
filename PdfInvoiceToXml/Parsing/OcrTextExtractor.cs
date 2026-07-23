@@ -34,7 +34,12 @@ public static class OcrTextExtractor
             using var bitmap = Conversion.ToImage(pdfStream, page: pageIndex, leaveOpen: true, options: new RenderOptions(Dpi: Dpi));
             using var pngData = bitmap.Encode(SKEncodedImageFormat.Png, 100);
             using var pix = Pix.LoadFromMemory(pngData.ToArray());
-            using var ocrPage = engine.Process(pix);
+            // PageSegMode.SingleBlock ("uniform block of text") is essential here:
+            // Tesseract's default automatic layout analysis tries to detect
+            // separate columns/paragraphs on a dense invoice like this and ends
+            // up reporting noticeably less consistent word bounding boxes, which
+            // breaks the line-reconstruction clustering below entirely.
+            using var ocrPage = engine.Process(pix, PageSegMode.SingleBlock);
             using var iter = ocrPage.GetIterator();
 
             var pageHeightPoints = bitmap.Height * 72.0 / Dpi;
