@@ -79,9 +79,17 @@ public static class InvoiceParser
         invoice.VatTable = ExtractVatTable(lines);
         invoice.Items = itemsHeaderIdx >= 0 ? ExtractItems(lines, itemsHeaderIdx) : new List<InvoiceItem>();
 
+        // Requiring a real decimal amount (not just any digit) on the line
+        // matters because OCR sometimes splits "Forma úhrady: ... CELKEM K
+        // ÚHRADĚ: 4.217,00" into two separate lines: an earlier label-only
+        // line ("Forma úhrady : CELKEM -:") whose only "number" is a stray
+        // digit from a misread colon, and the real total further down. A
+        // bare-digit match on the label line would grab that misread colon
+        // instead of the actual total.
         var totalLine = lines.FirstOrDefault(l =>
             l.Text.Contains("CELKEM", StringComparison.OrdinalIgnoreCase) &&
-            Regex.IsMatch(l.Text, "[ÚU]HRAD", RegexOptions.IgnoreCase));
+            Regex.IsMatch(l.Text, "[ÚU]HRAD", RegexOptions.IgnoreCase) &&
+            Regex.IsMatch(l.Text, @"\d[\d.,]*[.,]\d{2}(?!\d)"));
         // Take the *last* number-shaped token on the line rather than anchoring
         // to the end of the string - OCR sometimes appends stray junk after
         // the amount (logos, QR-code labels, ...).
