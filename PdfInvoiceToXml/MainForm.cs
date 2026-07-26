@@ -10,6 +10,13 @@ namespace PdfInvoiceToXml;
 
 public class MainForm : Form
 {
+    // Bumped by hand on every commit that changes parsing/XML-building
+    // behaviour. Shown in the title bar and startup log so a stale .exe
+    // (built before a fix landed) is immediately obvious instead of looking
+    // like "the fix didn't work" - see the debugging notes for how much time
+    // that confusion has cost.
+    private const string BuildTag = "2026-07-26";
+
     private static readonly Color AccentColor = Color.FromArgb(37, 99, 235);
     private static readonly Color BackgroundColor = Color.FromArgb(246, 247, 250);
     private static readonly Color BorderColor = Color.FromArgb(203, 213, 225);
@@ -30,7 +37,7 @@ public class MainForm : Form
 
     public MainForm()
     {
-        Text = "PDF --> XML (BETA)";
+        Text = $"PDF --> XML (BETA) - build {BuildTag}";
         Width = 820;
         Height = 560;
         MinimumSize = new Size(620, 420);
@@ -46,6 +53,7 @@ public class MainForm : Form
         DragEnter += Form_DragEnter;
         DragDrop += Form_DragDrop;
 
+        Log($"Build {BuildTag} - pokud po opravě chyby vidíte v titulku okna starší datum, aplikaci jste nepřekompilovali.", MutedColor);
         UpdateStatusLabel();
     }
 
