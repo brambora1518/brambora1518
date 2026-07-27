@@ -4,9 +4,12 @@ namespace PdfInvoiceToXml.Ui;
 
 /// <summary>
 /// A flat, pill-shaped button drawn by hand, with hover/pressed/disabled
-/// states and a focus ring. The stock WinForms button cannot do rounded
-/// corners or hover tints without looking dated, and the toolbar is the
-/// first thing the user sees.
+/// states and a focus ring.
+///
+/// Both variants are filled, the way Apple's controls are: solid blue for the
+/// primary action, a soft grey fill for everything else. Outlined buttons -
+/// what the stock WinForms button gives you - are the main thing that makes a
+/// toolbar look like a 2005 dialog.
 /// </summary>
 internal sealed class AccentButton : Control
 {
@@ -24,11 +27,11 @@ internal sealed class AccentButton : Control
 
         Cursor = Cursors.Hand;
         TabStop = true;
-        Height = 36;
+        Height = 38;
         Font = UiTheme.Body(9.5f, FontStyle.Bold);
     }
 
-    /// <summary>Filled accent styling for the primary action; outlined for the rest.</summary>
+    /// <summary>Solid accent fill for the primary action; soft grey for the rest.</summary>
     public bool Primary { get; set; }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -63,8 +66,8 @@ internal sealed class AccentButton : Control
 
     protected override void OnEnabledChanged(EventArgs e)
     {
-        // A disabled button keeps whatever hover state it had when it was
-        // disabled mid-hover, which then looks stuck once it re-enables.
+        // A button disabled mid-hover would otherwise keep that hover state and
+        // look stuck once it is enabled again.
         _hover = false;
         _pressed = false;
         Invalidate();
@@ -111,26 +114,22 @@ internal sealed class AccentButton : Control
         using var path = UiTheme.RoundedRect(rect, radius);
 
         Color fill;
-        Color border;
         Color textColor;
 
         if (!Enabled)
         {
-            fill = Primary ? Color.FromArgb(199, 196, 240) : UiTheme.Surface;
-            border = Primary ? Color.FromArgb(199, 196, 240) : UiTheme.Border;
+            fill = Primary ? Color.FromArgb(178, 213, 246) : UiTheme.Fill;
             textColor = Primary ? Color.White : UiTheme.Disabled;
         }
         else if (Primary)
         {
             fill = _pressed ? UiTheme.AccentDark : _hover ? UiTheme.AccentHover : UiTheme.Accent;
-            border = fill;
             textColor = Color.White;
         }
         else
         {
-            fill = _pressed ? UiTheme.AccentSoft : _hover ? UiTheme.SurfaceHover : UiTheme.Surface;
-            border = _hover ? UiTheme.Accent : UiTheme.Border;
-            textColor = _hover ? UiTheme.Accent : UiTheme.Text;
+            fill = _pressed ? UiTheme.Border : _hover ? UiTheme.FillHover : UiTheme.Fill;
+            textColor = UiTheme.Text;
         }
 
         using (var brush = new SolidBrush(fill))
@@ -138,15 +137,10 @@ internal sealed class AccentButton : Control
             g.FillPath(brush, path);
         }
 
-        using (var pen = new Pen(border))
-        {
-            g.DrawPath(pen, path);
-        }
-
         if (Focused && Enabled)
         {
-            var ringRect = Rectangle.Inflate(rect, -3, -3);
-            using var ringPath = UiTheme.RoundedRect(ringRect, Math.Max(2, radius - 3));
+            var ring = Rectangle.Inflate(rect, -3, -3);
+            using var ringPath = UiTheme.RoundedRect(ring, Math.Max(2, radius - 3));
             using var ringPen = new Pen(Primary ? Color.White : UiTheme.Accent) { DashStyle = DashStyle.Dot };
             g.DrawPath(ringPen, ringPath);
         }

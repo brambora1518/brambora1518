@@ -4,40 +4,80 @@ using System.Reflection;
 namespace PdfInvoiceToXml.Ui;
 
 /// <summary>
-/// Single source of truth for the app's colours, fonts and the handful of
-/// GDI+ helpers the custom-drawn controls share. Keeping them here rather
-/// than as literals scattered across the form is what makes the window read
-/// as one designed product instead of a pile of default WinForms controls.
+/// Single source of truth for the app's colours, fonts, corner radii and the
+/// GDI+ helpers the custom-drawn controls share.
+///
+/// The palette follows Apple's light-mode system colours rather than the stock
+/// WinForms grey: a near-white page tint with pure white cards floating on it,
+/// hairline separators instead of hard borders, and soft shadows doing the work
+/// that outlines used to. That layering - plus generous padding and large
+/// corner radii - is most of what makes a window read as "designed".
 /// </summary>
 internal static class UiTheme
 {
-    public static readonly Color Accent = Color.FromArgb(79, 70, 229);
-    public static readonly Color AccentHover = Color.FromArgb(91, 82, 235);
-    public static readonly Color AccentDark = Color.FromArgb(67, 56, 202);
-    public static readonly Color AccentSoft = Color.FromArgb(238, 236, 254);
+    // Apple system blue, plus the tints used for hover, pressed and fills.
+    public static readonly Color Accent = Color.FromArgb(0, 113, 227);
+    public static readonly Color AccentHover = Color.FromArgb(0, 125, 250);
+    public static readonly Color AccentDark = Color.FromArgb(0, 98, 196);
+    public static readonly Color AccentSoft = Color.FromArgb(232, 241, 253);
 
-    public static readonly Color Background = Color.FromArgb(246, 247, 250);
-    public static readonly Color Surface = Color.White;
-    public static readonly Color SurfaceHover = Color.FromArgb(249, 250, 252);
-    public static readonly Color Border = Color.FromArgb(226, 232, 240);
+    // #F5F5F7 is Apple's page tint; cards sit on it in pure white.
+    public static readonly Color Background = Color.FromArgb(245, 245, 247);
+    public static readonly Color Surface = Color.FromArgb(255, 255, 255);
+    public static readonly Color SurfaceHover = Color.FromArgb(247, 247, 249);
+    public static readonly Color Fill = Color.FromArgb(239, 239, 242);
+    public static readonly Color FillHover = Color.FromArgb(232, 232, 236);
+    public static readonly Color Border = Color.FromArgb(229, 229, 231);
+    public static readonly Color Separator = Color.FromArgb(240, 240, 242);
 
-    public static readonly Color Text = Color.FromArgb(30, 41, 59);
-    public static readonly Color Muted = Color.FromArgb(100, 110, 125);
-    public static readonly Color Disabled = Color.FromArgb(163, 172, 184);
+    public static readonly Color Text = Color.FromArgb(29, 29, 31);
+    public static readonly Color Muted = Color.FromArgb(110, 110, 115);
+    public static readonly Color Disabled = Color.FromArgb(174, 174, 178);
 
-    public static readonly Color Ok = Color.FromArgb(21, 128, 61);
-    public static readonly Color Warn = Color.FromArgb(161, 98, 7);
-    public static readonly Color Error = Color.FromArgb(185, 28, 28);
+    public static readonly Color Ok = Color.FromArgb(29, 138, 78);
+    public static readonly Color Warn = Color.FromArgb(178, 80, 0);
+    public static readonly Color Error = Color.FromArgb(215, 0, 21);
 
-    public static readonly Color OkSoft = Color.FromArgb(220, 252, 231);
-    public static readonly Color WarnSoft = Color.FromArgb(254, 243, 199);
-    public static readonly Color ErrorSoft = Color.FromArgb(254, 226, 226);
-    public static readonly Color MutedSoft = Color.FromArgb(241, 245, 249);
+    public static readonly Color OkSoft = Color.FromArgb(227, 247, 234);
+    public static readonly Color WarnSoft = Color.FromArgb(255, 244, 224);
+    public static readonly Color ErrorSoft = Color.FromArgb(255, 233, 233);
+    public static readonly Color MutedSoft = Color.FromArgb(240, 240, 242);
 
-    private const string FamilyName = "Segoe UI";
+    public const int CardRadius = 16;
+    public const int DropZoneRadius = 18;
+
+    private const string FallbackFamily = "Segoe UI";
+
+    // Segoe UI Semibold is a real, separately installed family on Windows -
+    // the closest thing to the weight Apple uses for headings. Deliberately
+    // NOT using "Segoe UI Variable": it is a variable font and GDI+ predates
+    // those, so it renders unpredictably in WinForms.
+    private static readonly string SemiboldFamily =
+        FamilyExists("Segoe UI Semibold") ? "Segoe UI Semibold" : FallbackFamily;
 
     public static Font Body(float size = 9.5f, FontStyle style = FontStyle.Regular) =>
-        new(FamilyName, size, style);
+        new(FallbackFamily, size, style);
+
+    /// <summary>Heading weight - real Semibold where available, Bold as a fallback.</summary>
+    public static Font Heading(float size) =>
+        SemiboldFamily == FallbackFamily
+            ? new Font(FallbackFamily, size, FontStyle.Bold)
+            : new Font(SemiboldFamily, size, FontStyle.Regular);
+
+    private static bool FamilyExists(string name)
+    {
+        try
+        {
+            // The Font constructor silently substitutes a missing family,
+            // so availability has to be probed through FontFamily instead.
+            using var family = new FontFamily(name);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Rounded-rectangle path behind every card, chip and button in the UI.</summary>
     public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -65,6 +105,41 @@ internal static class UiTheme
 
         path.CloseFigure();
         return path;
+    }
+
+    /// <summary>
+    /// Approximates a soft drop shadow by stroking concentric rounded outlines
+    /// at decreasing opacity. GDI+ has no blur, and this is far cheaper than
+    /// compositing a blurred bitmap on every repaint.
+    /// </summary>
+    public static void DrawSoftShadow(Graphics g, Rectangle card, int radius, int spread = 6)
+    {
+        for (var i = spread; i >= 1; i--)
+        {
+            var alpha = 14 - (i * 12 / spread);
+            if (alpha <= 0) continue;
+
+            var ring = Rectangle.Inflate(card, i, i);
+            ring.Offset(0, 1);
+
+            using var path = RoundedRect(ring, radius + i);
+            using var pen = new Pen(Color.FromArgb(alpha, 0, 0, 0), 1.8f);
+            g.DrawPath(pen, path);
+        }
+    }
+
+    /// <summary>Fills a card with its shadow, background and hairline border in one call.</summary>
+    public static void DrawCard(Graphics g, Rectangle card, int radius, Color fill, bool shadow = true)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        if (shadow) DrawSoftShadow(g, card, radius);
+
+        using var path = RoundedRect(card, radius);
+        using var brush = new SolidBrush(fill);
+        g.FillPath(brush, path);
+
+        using var pen = new Pen(Border);
+        g.DrawPath(pen, path);
     }
 
     /// <summary>Clips a control to a pill shape. Used for the BETA badge and status chips.</summary>

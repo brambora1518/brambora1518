@@ -72,7 +72,6 @@ public class MainForm : Form
         Controls.Add(BuildDropZone());
         Controls.Add(BuildToolbar());
         Controls.Add(BuildHeader());
-        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 3, BackColor = UiTheme.Accent });
 
         DragEnter += Form_DragEnter;
         DragDrop += Form_DragDrop;
@@ -82,6 +81,16 @@ public class MainForm : Form
         UpdateStatusBar();
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+
+        // Rounds the window's outer corners and tints the title bar to match
+        // the header, so the caption and the app read as one surface. Windows
+        // 11 only; silently does nothing on Windows 10.
+        WindowChrome.Apply(Handle, UiTheme.Surface, UiTheme.Text, UiTheme.Border);
+    }
+
     // ---------------------------------------------------------------- layout
 
     private Control BuildHeader()
@@ -89,13 +98,15 @@ public class MainForm : Form
         var header = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 58,
+            Height = 66,
             BackColor = UiTheme.Surface,
-            Padding = new Padding(24, 0, 24, 0)
+            Padding = new Padding(28, 0, 28, 0)
         };
         header.Paint += (_, e) =>
         {
-            using var pen = new Pen(UiTheme.Border);
+            // A hairline, the way a macOS toolbar separates from its content -
+            // not the hard rule a default WinForms panel would give you.
+            using var pen = new Pen(UiTheme.Separator);
             e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1);
         };
 
@@ -116,26 +127,26 @@ public class MainForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
             BackColor = UiTheme.Surface,
-            Location = new Point(24, 16)
+            Location = new Point(28, 19)
         };
 
         var title = new Label
         {
             AutoSize = true,
             Text = "PDF → XML",
-            Font = UiTheme.Body(16f, FontStyle.Bold),
+            Font = UiTheme.Heading(16.5f),
             ForeColor = UiTheme.Text,
-            Margin = new Padding(0, 0, 10, 0)
+            Margin = new Padding(0, 0, 12, 0)
         };
 
         var badge = new Label
         {
             AutoSize = true,
             Text = "BETA",
-            Font = UiTheme.Body(8f, FontStyle.Bold),
+            Font = UiTheme.Body(7.5f, FontStyle.Bold),
             ForeColor = Color.White,
             BackColor = UiTheme.Accent,
-            Padding = new Padding(9, 3, 9, 3),
+            Padding = new Padding(10, 3, 10, 3),
             Margin = new Padding(0, 9, 0, 0)
         };
         badge.Resize += (_, _) => UiTheme.ApplyPillRegion(badge);
@@ -153,9 +164,9 @@ public class MainForm : Form
         var bar = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 60,
+            Height = 68,
             BackColor = UiTheme.Background,
-            Padding = new Padding(24, 12, 24, 12)
+            Padding = new Padding(28, 15, 28, 15)
         };
 
         var row = new FlowLayoutPanel
@@ -188,7 +199,7 @@ public class MainForm : Form
         button.Text = text;
         button.Primary = primary;
         button.Width = width;
-        button.Height = 36;
+        button.Height = 38;
         button.Margin = new Padding(0, 0, 10, 0);
     }
 
@@ -197,9 +208,9 @@ public class MainForm : Form
         var wrapper = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 168,
+            Height = 186,
             BackColor = UiTheme.Background,
-            Padding = new Padding(24, 0, 24, 14),
+            Padding = new Padding(21, 0, 21, 10),
             AllowDrop = true
         };
 
@@ -231,24 +242,27 @@ public class MainForm : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-        var rect = new Rectangle(0, 0, _dropZone.Width - 1, _dropZone.Height - 1);
-        if (rect.Width <= 4 || rect.Height <= 4) return;
+        // Inset so the soft shadow has room to fall outside the card.
+        var rect = Rectangle.Inflate(new Rectangle(0, 0, _dropZone.Width - 1, _dropZone.Height - 1), -7, -7);
+        if (rect.Width <= 8 || rect.Height <= 8) return;
 
-        using (var path = UiTheme.RoundedRect(rect, 18))
+        UiTheme.DrawSoftShadow(g, rect, UiTheme.DropZoneRadius);
+
+        using (var path = UiTheme.RoundedRect(rect, UiTheme.DropZoneRadius))
         {
             using var fill = new SolidBrush(_dropActive ? UiTheme.AccentSoft : UiTheme.Surface);
             g.FillPath(fill, path);
 
-            using var pen = new Pen(_dropActive ? UiTheme.Accent : UiTheme.Border, _dropActive ? 2f : 1.4f)
+            using var pen = new Pen(_dropActive ? UiTheme.Accent : UiTheme.Border, _dropActive ? 2f : 1.3f)
             {
                 DashStyle = DashStyle.Dash
             };
             g.DrawPath(pen, path);
         }
 
-        const float diameter = 48f;
-        var centerX = rect.Width / 2f;
-        var circleTop = Math.Max(12f, rect.Height * 0.16f);
+        const float diameter = 52f;
+        var centerX = rect.X + rect.Width / 2f;
+        var circleTop = rect.Y + Math.Max(12f, rect.Height * 0.17f);
         var circleRect = new RectangleF(centerX - diameter / 2f, circleTop, diameter, diameter);
 
         using (var circleBrush = new SolidBrush(_dropActive ? Color.White : UiTheme.AccentSoft))
@@ -258,15 +272,15 @@ public class MainForm : Form
 
         DrawUploadGlyph(g, centerX, circleTop + diameter / 2f);
 
-        var titleTop = (int)(circleTop + diameter + 14f);
-        var titleRect = new Rectangle(0, titleTop, rect.Width, 22);
+        var titleTop = (int)(circleTop + diameter + 16f);
+        var titleRect = new Rectangle(rect.X, titleTop, rect.Width, 24);
         TextRenderer.DrawText(
             g,
             _converting ? "Probíhá převod…" : "Přetáhněte sem PDF faktury",
             _dropTitleFont, titleRect, UiTheme.Text,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.Top);
 
-        var hintRect = new Rectangle(0, titleRect.Bottom + 2, rect.Width, 20);
+        var hintRect = new Rectangle(rect.X, titleRect.Bottom + 3, rect.Width, 20);
         TextRenderer.DrawText(
             g,
             _converting
@@ -303,7 +317,7 @@ public class MainForm : Form
         _progressPanel.Dock = DockStyle.Top;
         _progressPanel.Height = 42;
         _progressPanel.BackColor = UiTheme.Background;
-        _progressPanel.Padding = new Padding(24, 0, 24, 12);
+        _progressPanel.Padding = new Padding(28, 0, 28, 12);
         _progressPanel.Visible = false;
 
         _progressTrack.Dock = DockStyle.Bottom;
@@ -355,7 +369,7 @@ public class MainForm : Form
         var wrapper = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(24, 0, 24, 14),
+            Padding = new Padding(21, 0, 21, 10),
             BackColor = UiTheme.Background
         };
 
@@ -363,24 +377,22 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             BackColor = UiTheme.Background,
-            Padding = new Padding(12, 10, 12, 10)
+            // Left/right room for the shadow, plus the list's own inset.
+            Padding = new Padding(18, 16, 18, 16)
         };
         UiTheme.EnableDoubleBuffer(card);
         card.Paint += (_, e) =>
         {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
-            if (rect.Width <= 4 || rect.Height <= 4) return;
+            var rect = Rectangle.Inflate(new Rectangle(0, 0, card.Width - 1, card.Height - 1), -7, -7);
+            if (rect.Width <= 8 || rect.Height <= 8) return;
 
-            using var path = UiTheme.RoundedRect(rect, 14);
-            using var fill = new SolidBrush(UiTheme.Surface);
-            e.Graphics.FillPath(fill, path);
-            using var pen = new Pen(UiTheme.Border);
-            e.Graphics.DrawPath(pen, path);
+            UiTheme.DrawCard(e.Graphics, rect, UiTheme.CardRadius, UiTheme.Surface);
         };
 
         _statusIcons.ColorDepth = ColorDepth.Depth32Bit;
-        _statusIcons.ImageSize = new Size(12, 12);
+        // The image height also sets the ListView's row height, so this is what
+        // gives the list its roomier, less spreadsheet-like line spacing.
+        _statusIcons.ImageSize = new Size(16, 22);
         _statusIcons.Images.Add("ok", MakeStatusDot(UiTheme.Ok));
         _statusIcons.Images.Add("warn", MakeStatusDot(UiTheme.Warn));
         _statusIcons.Images.Add("error", MakeStatusDot(UiTheme.Error));
@@ -392,10 +404,13 @@ public class MainForm : Form
         _logView.GridLines = false;
         _logView.BorderStyle = BorderStyle.None;
         _logView.BackColor = UiTheme.Surface;
-        _logView.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+        // No column headers: the list has an icon, a time and a message, which
+        // needs no labelling, and the header band is the single most
+        // spreadsheet-looking thing in the window.
+        _logView.HeaderStyle = ColumnHeaderStyle.None;
         _logView.SmallImageList = _statusIcons;
-        _logView.Columns.Add("", 28);
-        _logView.Columns.Add("Čas", 66);
+        _logView.Columns.Add("", 30);
+        _logView.Columns.Add("Čas", 70);
         _logView.Columns.Add("Zpráva", 560);
         _logView.AllowDrop = true;
         _logView.DragEnter += Form_DragEnter;
@@ -439,8 +454,11 @@ public class MainForm : Form
         var statusBar = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 30,
-            BackColor = UiTheme.Background
+            Height = 32,
+            BackColor = UiTheme.Background,
+            // Lines up with the card's visual edge, which sits 7px inside its
+            // panel to leave room for the shadow.
+            Padding = new Padding(7, 0, 7, 0)
         };
 
         _statusIdleLabel.Dock = DockStyle.Fill;
@@ -885,13 +903,18 @@ public class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// A small coloured dot centred in a 16x22 canvas. The canvas is
+    /// deliberately taller than the dot: ListView takes its row height from the
+    /// image list, so this is what spaces the log rows out.
+    /// </summary>
     private static Bitmap MakeStatusDot(Color color)
     {
-        var bmp = new Bitmap(12, 12);
+        var bmp = new Bitmap(16, 22);
         using var g = Graphics.FromImage(bmp);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using var brush = new SolidBrush(color);
-        g.FillEllipse(brush, 1, 1, 10, 10);
+        g.FillEllipse(brush, 4, 7, 8, 8);
         return bmp;
     }
 
