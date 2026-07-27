@@ -639,7 +639,8 @@ public class MainForm : Form
         string PdfPath,
         string? XmlPath,
         bool WasOcr,
-        int ItemCount,
+        int VatRateCount,
+        decimal GrandTotal,
         string? Error);
 
     /// <summary>
@@ -669,11 +670,12 @@ public class MainForm : Form
                 xml.Save(writer);
             }
 
-            return new ConversionResult(pdfPath, outputPath, invoice.WasOcr, invoice.Items.Count, null);
+            return new ConversionResult(
+                pdfPath, outputPath, invoice.WasOcr, invoice.VatTable.Count, invoice.GrandTotal, null);
         }
         catch (Exception ex)
         {
-            return new ConversionResult(pdfPath, null, false, 0, ex.Message);
+            return new ConversionResult(pdfPath, null, false, 0, 0m, ex.Message);
         }
     }
 
@@ -686,8 +688,8 @@ public class MainForm : Form
             return;
         }
 
-        var itemNote = result.ItemCount == 1 ? "1 položka" : $"{result.ItemCount} položek";
-        Log($"{Path.GetFileName(result.PdfPath)} → {Path.GetFileName(result.XmlPath!)}  ({itemNote})",
+        Log($"{Path.GetFileName(result.PdfPath)} → {Path.GetFileName(result.XmlPath!)}" +
+            $"  (celkem {result.GrandTotal:0.00} Kč)",
             LogKind.Ok, result.XmlPath);
         _okCount++;
 
@@ -701,9 +703,11 @@ public class MainForm : Form
             _warnCount++;
         }
 
-        if (result.ItemCount == 0)
+        // Every amount in the XML is derived from the VAT recap table, so if
+        // that was not found the output is structurally valid but worthless.
+        if (result.VatRateCount == 0)
         {
-            Log("    POZOR: nenalezena žádná položka faktury — zkontrolujte, zda jde o podporovaný formát.",
+            Log("    POZOR: nenalezena rekapitulace DPH — výsledné XML nemá žádné částky, zkontrolujte fakturu.",
                 LogKind.Warn);
             _warnCount++;
         }

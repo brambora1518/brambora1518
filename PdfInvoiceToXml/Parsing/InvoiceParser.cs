@@ -64,6 +64,10 @@ public static class InvoiceParser
             VatDate = FindDate(headerText, @"Datum\s+uskut\S*"),
             DueDate = FindDate(headerText, @"[Ss]platnosti"),
             VariableSymbol = Match1(headerText, @"[Vv]ariabiln\S*\s+symbol.{0,10}?(\d{3,})") ?? "",
+            // Mirrors the variable-symbol pattern above. This was never read at
+            // all before, so ConstantSymbol always came out empty even when the
+            // invoice printed one (the reference export for 354/26 has "0308").
+            ConstantSymbol = Match1(headerText, @"[Kk]onstantn\S*\s+symbol.{0,10}?(\d{3,})") ?? "",
             PaymentType = MapPaymentType(Match1(headerText, @"[ZF]orm\S*\s+[úu]hrady.{0,10}?([\w.]+)")),
             TextAbove = Match1(fullText, @"(TATO FAKTURA[^\n]*)") ?? "",
             WasOcr = usedOcr,
