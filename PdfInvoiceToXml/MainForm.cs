@@ -43,12 +43,28 @@ public class MainForm : Form
     private readonly AccentButton _openFolderButton = new();
     private readonly AccentButton _clearButton = new();
 
-    private readonly Font _dropTitleFont = UiTheme.Body(11f, FontStyle.Bold);
+    private readonly ToolTip _tips = new();
+
+    private readonly Font _dropTitleFont = UiTheme.Heading(11.5f);
     private readonly Font _dropHintFont = UiTheme.Body(9f);
+    private readonly Font _logFont = UiTheme.Body(9.5f);
+    private readonly Font _tipFont = UiTheme.Body(9f);
+
+    /// <summary>What a log row carries, so a click can act on the file it named.</summary>
+    private sealed record LogRow(LogKind Kind, string? XmlPath);
 
     private bool _dropActive;
+    private bool _dropHover;
+    private int _hoveredLogRow = -1;
     private bool _converting;
     private double _progressValue;
+
+    // A single file gives no meaningful progress - parsing plus OCR is one
+    // opaque step - so the bar animates instead of sitting frozen at 0%.
+    private bool _progressIndeterminate;
+    private double _progressPhase;
+    private readonly System.Windows.Forms.Timer _progressAnimation = new();
+
     private string? _lastOutputDirectory;
 
     private int _okCount;
@@ -88,8 +104,61 @@ public class MainForm : Form
         _clock.Tick += (_, _) => UpdateClock();
         _clock.Start();
 
-        Log($"Build {BuildTag} — pokud po opravě chyby vidíte v titulku okna starší datum, aplikaci jste nepřekompilovali.", LogKind.Info);
+        _progressAnimation.Interval = 40;
+        _progressAnimation.Tick += (_, _) =>
+        {
+            _progressPhase = (_progressPhase + 0.02) % 1.0;
+            _progressTrack.Invalidate();
+        };
+
+        SetUpTooltips();
+
+        LogBuildTag();
         UpdateStatusBar();
+    }
+
+    /// <summary>
+    /// Tooltips are owner-drawn because the stock one is a light-yellow system
+    /// balloon, which is jarring in a dark window - and they carry the keyboard
+    /// shortcut, which is how the shortcuts stay discoverable at all.
+    /// </summary>
+    private void SetUpTooltips()
+    {
+        _tips.OwnerDraw = true;
+        _tips.Draw += (_, e) =>
+        {
+            using var back = new SolidBrush(UiTheme.Fill);
+            e.Graphics.FillRectangle(back, e.Bounds);
+
+            using var pen = new Pen(UiTheme.Border);
+            e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+
+            TextRenderer.DrawText(
+                e.Graphics, e.ToolTipText, _tipFont, e.Bounds, UiTheme.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        };
+
+        _tips.SetToolTip(_pickButton, "Vybrat PDF faktury k převodu   (Ctrl+O)");
+        _tips.SetToolTip(_openFolderButton, "Otevřít složku s vytvořenými XML   (Ctrl+E)");
+        _tips.SetToolTip(_clearButton, "Vymazat záznamy v logu   (Ctrl+L)");
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        switch (keyData)
+        {
+            case Keys.Control | Keys.O:
+                PickFiles();
+                return true;
+            case Keys.Control | Keys.E:
+                OpenOutputFolder();
+                return true;
+            case Keys.Control | Keys.L:
+                ClearLog();
+                return true;
+            default:
+                return base.ProcessCmdKey(ref msg, keyData);
+        }
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -238,6 +307,10 @@ public class MainForm : Form
         _dropZone.Paint += DropZone_Paint;
         _dropZone.Click += (_, _) => PickFiles();
 
+        // The zone is clickable, and a cursor change alone is a weak hint.
+        _dropZone.MouseEnter += (_, _) => SetDropHover(true);
+        _dropZone.MouseLeave += (_, _) => SetDropHover(false);
+
         _dropZone.DragEnter += DropZone_DragEnter;
         _dropZone.DragLeave += DropZone_DragLeave;
         _dropZone.DragDrop += Form_DragDrop;
@@ -262,13 +335,17 @@ public class MainForm : Form
 
         using (var path = UiTheme.RoundedRect(rect, UiTheme.DropZoneRadius))
         {
-            using var fill = new SolidBrush(_dropActive ? UiTheme.AccentSoft : UiTheme.Surface);
+            var fillColor = _dropActive ? UiTheme.AccentSoft
+                : _dropHover ? UiTheme.SurfaceHover
+                : UiTheme.Surface;
+            using var fill = new SolidBrush(fillColor);
             g.FillPath(fill, path);
 
-            using var pen = new Pen(_dropActive ? UiTheme.Accent : UiTheme.Border, _dropActive ? 2f : 1.3f)
-            {
-                DashStyle = DashStyle.Dash
-            };
+            // Solid once a drag is actually over the zone: dashes read as
+            // "drop something here", a solid accent ring as "release now".
+            using var pen = _dropActive
+                ? new Pen(UiTheme.Accent, 2f)
+                : new Pen(_dropHover ? UiTheme.Accent : UiTheme.Border, 1.4f) { DashStyle = DashStyle.Dash };
             g.DrawPath(pen, path);
         }
 
@@ -365,15 +442,31 @@ public class MainForm : Form
             g.FillPath(brush, path);
         }
 
-        var filledWidth = (int)Math.Round(track.Width * Math.Clamp(_progressValue, 0d, 1d));
-        if (filledWidth < barHeight) return;
+        var filled = _progressIndeterminate
+            ? IndeterminateSegment(track, barHeight)
+            : new Rectangle(track.X, track.Y,
+                (int)Math.Round(track.Width * Math.Clamp(_progressValue, 0d, 1d)), barHeight);
 
-        var filled = new Rectangle(track.X, track.Y, filledWidth, barHeight);
+        if (filled.Width < barHeight) return;
+
         using (var path = UiTheme.RoundedRect(filled, barHeight / 2))
         using (var brush = new SolidBrush(UiTheme.Accent))
         {
             g.FillPath(brush, path);
         }
+    }
+
+    /// <summary>
+    /// A segment sweeping left to right, clipped to the track so it slides in
+    /// and out of both ends instead of popping into existence.
+    /// </summary>
+    private Rectangle IndeterminateSegment(Rectangle track, int barHeight)
+    {
+        var segment = Math.Max(barHeight * 4, track.Width / 4);
+        var travel = track.Width + segment;
+        var left = track.X + (int)(travel * _progressPhase) - segment;
+
+        return Rectangle.Intersect(track, new Rectangle(left, track.Y, segment, barHeight));
     }
 
     private Control BuildLogArea()
@@ -401,14 +494,11 @@ public class MainForm : Form
             UiTheme.DrawCard(e.Graphics, rect, UiTheme.CardRadius, UiTheme.Surface);
         };
 
+        // An empty image purely to set the row height - ListView takes it from
+        // the image list, and the status dots are drawn by hand below.
         _statusIcons.ColorDepth = ColorDepth.Depth32Bit;
-        // The image height also sets the ListView's row height, so this is what
-        // gives the list its roomier, less spreadsheet-like line spacing.
-        _statusIcons.ImageSize = new Size(16, 22);
-        _statusIcons.Images.Add("ok", MakeStatusDot(UiTheme.Ok));
-        _statusIcons.Images.Add("warn", MakeStatusDot(UiTheme.Warn));
-        _statusIcons.Images.Add("error", MakeStatusDot(UiTheme.Error));
-        _statusIcons.Images.Add("info", MakeStatusDot(UiTheme.Muted));
+        _statusIcons.ImageSize = new Size(16, 24);
+        _statusIcons.Images.Add("spacer", new Bitmap(16, 24));
 
         _logView.Dock = DockStyle.Fill;
         _logView.View = View.Details;
@@ -425,6 +515,18 @@ public class MainForm : Form
         _logView.Columns.Add("", 30);
         _logView.Columns.Add("Čas", 70);
         _logView.Columns.Add("Zpráva", 560);
+        _logView.MultiSelect = false;
+
+        // Owner-drawn because the default selection is painted in the system
+        // highlight colour, which shows up as a slab of Windows blue in the
+        // middle of a purple-on-near-black window. Drawing the rows also gets
+        // rid of the dotted focus rectangle and buys a hover state.
+        _logView.OwnerDraw = true;
+        _logView.DrawItem += LogView_DrawItem;
+        _logView.DrawSubItem += LogView_DrawSubItem;
+        _logView.MouseMove += LogView_MouseMove;
+        _logView.MouseLeave += (_, _) => SetHoveredLogRow(-1);
+
         _logView.AllowDrop = true;
         _logView.DragEnter += Form_DragEnter;
         _logView.DragDrop += Form_DragDrop;
@@ -438,6 +540,88 @@ public class MainForm : Form
         wrapper.Controls.Add(BuildStatusBar());
         return wrapper;
     }
+
+    private void LogView_DrawItem(object? sender, DrawListViewItemEventArgs e)
+    {
+        var selected = (e.State & ListViewItemStates.Selected) != 0;
+        var background = selected ? UiTheme.AccentSoft
+            : e.ItemIndex == _hoveredLogRow ? UiTheme.SurfaceHover
+            : UiTheme.Surface;
+
+        using var brush = new SolidBrush(background);
+        e.Graphics.FillRectangle(brush, e.Bounds);
+    }
+
+    private void LogView_DrawSubItem(object? sender, DrawListViewSubItemEventArgs e)
+    {
+        var g = e.Graphics;
+        var kind = (e.Item?.Tag as LogRow)?.Kind ?? LogKind.Info;
+
+        if (e.ColumnIndex == 0)
+        {
+            // For the first column e.Bounds can span the whole row, so the dot
+            // is placed from the row's left edge rather than from the cell.
+            const int size = 8;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var dot = new SolidBrush(StatusColor(kind));
+            g.FillEllipse(dot, e.Bounds.Left + 11, e.Bounds.Top + (e.Bounds.Height - size) / 2, size, size);
+            return;
+        }
+
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+
+        // Timestamps are metadata and stay muted whatever the row's status is;
+        // only the message itself carries the colour.
+        var color = e.ColumnIndex == 1 ? UiTheme.Muted : StatusTextColor(kind);
+
+        var bounds = e.Bounds;
+        bounds.X += 2;
+        bounds.Width -= 6;
+
+        TextRenderer.DrawText(
+            g, e.SubItem?.Text ?? "", _logFont, bounds, color,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+    }
+
+    private void LogView_MouseMove(object? sender, MouseEventArgs e) =>
+        SetHoveredLogRow(_logView.GetItemAt(e.X, e.Y)?.Index ?? -1);
+
+    private void SetHoveredLogRow(int index)
+    {
+        if (_hoveredLogRow == index) return;
+
+        var previous = _hoveredLogRow;
+        _hoveredLogRow = index;
+        InvalidateLogRow(previous);
+        InvalidateLogRow(index);
+    }
+
+    private void InvalidateLogRow(int index)
+    {
+        if (index < 0 || index >= _logView.Items.Count) return;
+        _logView.Invalidate(_logView.Items[index].Bounds);
+    }
+
+    private static Color StatusColor(LogKind kind) => kind switch
+    {
+        LogKind.Ok => UiTheme.Ok,
+        LogKind.Warn => UiTheme.Warn,
+        LogKind.Error => UiTheme.Error,
+        _ => UiTheme.Muted
+    };
+
+    /// <summary>
+    /// Successful rows read in plain body text - colouring every one green
+    /// would make a normal run look like a wall of alerts - so only warnings
+    /// and errors take their status colour.
+    /// </summary>
+    private static Color StatusTextColor(LogKind kind) => kind switch
+    {
+        LogKind.Ok => UiTheme.Text,
+        LogKind.Warn => UiTheme.Warn,
+        LogKind.Error => UiTheme.Error,
+        _ => UiTheme.Muted
+    };
 
     private ContextMenuStrip BuildLogContextMenu()
     {
@@ -577,6 +761,13 @@ public class MainForm : Form
         _dropZone.Invalidate();
     }
 
+    private void SetDropHover(bool hover)
+    {
+        if (_dropHover == hover || _converting) return;
+        _dropHover = hover;
+        _dropZone.Invalidate();
+    }
+
     /// <summary>
     /// Accepts dropped folders as well as files - dragging the folder a batch
     /// of invoices lives in is the obvious thing to try, and silently doing
@@ -660,6 +851,10 @@ public class MainForm : Form
             UpdateStatusBar();
             return;
         }
+
+        // With several files the bar can show real progress across them; with
+        // one there is nothing to report until it finishes, so it animates.
+        _progressIndeterminate = pdfPaths.Count == 1;
 
         SetBusy(true);
         var startedAt = DateTime.Now;
@@ -782,8 +977,19 @@ public class MainForm : Form
         _dropZone.Cursor = busy ? Cursors.Default : Cursors.Hand;
         UseWaitCursor = busy;
 
-        if (!busy)
+        if (busy)
         {
+            _dropHover = false;
+            if (_progressIndeterminate)
+            {
+                _progressPhase = 0d;
+                _progressAnimation.Start();
+            }
+        }
+        else
+        {
+            _progressAnimation.Stop();
+            _progressIndeterminate = false;
             SetProgress(0d);
             _progressLabel.Text = "";
         }
@@ -801,24 +1007,10 @@ public class MainForm : Form
 
     private void Log(string message, LogKind kind, string? xmlPath = null)
     {
-        var iconKey = kind switch
-        {
-            LogKind.Ok => "ok",
-            LogKind.Warn => "warn",
-            LogKind.Error => "error",
-            _ => "info"
-        };
-
-        var foreColor = kind switch
-        {
-            LogKind.Ok => UiTheme.Text,
-            LogKind.Warn => UiTheme.Warn,
-            LogKind.Error => UiTheme.Error,
-            _ => UiTheme.Muted
-        };
-
-        var item = new ListViewItem("") { ImageKey = iconKey, ForeColor = foreColor, Tag = xmlPath };
-        item.SubItems.Add(DateTime.Now.ToString("HH:mm:ss"));
+        // The row's colours come from its Kind at paint time, so the item only
+        // needs to carry the kind and the file it refers to.
+        var item = new ListViewItem("") { ImageKey = "spacer", Tag = new LogRow(kind, xmlPath) };
+        item.SubItems.Add(DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
         item.SubItems.Add(message);
 
         _logView.Items.Add(item);
@@ -830,11 +1022,20 @@ public class MainForm : Form
         if (_converting) return;
 
         _logView.Items.Clear();
+        SetHoveredLogRow(-1);
         _okCount = 0;
         _warnCount = 0;
         _errorCount = 0;
+
+        // Re-state the build straight away: it is the one line worth never
+        // losing, and it leaves the panel with content rather than a void.
+        LogBuildTag();
         UpdateStatusBar();
     }
+
+    private void LogBuildTag() =>
+        Log($"Build {BuildTag} — pokud po opravě chyby vidíte v titulku okna starší datum, aplikaci jste nepřekompilovali.",
+            LogKind.Info);
 
     /// <summary>
     /// Numeric date and time. The project builds with InvariantGlobalization,
@@ -867,7 +1068,7 @@ public class MainForm : Form
     private string? SelectedXmlPath()
     {
         if (_logView.SelectedItems.Count == 0) return null;
-        return _logView.SelectedItems[0].Tag as string;
+        return (_logView.SelectedItems[0].Tag as LogRow)?.XmlPath;
     }
 
     private void OpenSelectedXml()
@@ -953,21 +1154,6 @@ public class MainForm : Form
         }
     }
 
-    /// <summary>
-    /// A small coloured dot centred in a 16x22 canvas. The canvas is
-    /// deliberately taller than the dot: ListView takes its row height from the
-    /// image list, so this is what spaces the log rows out.
-    /// </summary>
-    private static Bitmap MakeStatusDot(Color color)
-    {
-        var bmp = new Bitmap(16, 22);
-        using var g = Graphics.FromImage(bmp);
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var brush = new SolidBrush(color);
-        g.FillEllipse(brush, 4, 7, 8, 8);
-        return bmp;
-    }
-
     protected override void Dispose(bool disposing)
     {
         // Base first: the ListView still references _statusIcons and the drop
@@ -978,8 +1164,13 @@ public class MainForm : Form
         {
             _clock.Stop();
             _clock.Dispose();
+            _progressAnimation.Stop();
+            _progressAnimation.Dispose();
+            _tips.Dispose();
             _dropTitleFont.Dispose();
             _dropHintFont.Dispose();
+            _logFont.Dispose();
+            _tipFont.Dispose();
             _statusIcons.Dispose();
         }
     }
