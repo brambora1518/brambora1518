@@ -17,22 +17,22 @@ namespace PdfInvoiceToXml.Ui;
 internal static class UiTheme
 {
     // The accent exists at two levels, and mixing them up is the classic
-    // dark-theme contrast bug. Accent is Apple's dark-mode blue and is used
-    // where the blue is the *foreground* on a dark surface - the upload glyph,
-    // the progress bar, focus rings. AccentFill is a darker blue used where
-    // white text sits *on top* of the blue; Apple's own #0A84FF only reaches
-    // 3.65:1 against white, which is below the 4.5:1 needed for body text.
-    public static readonly Color Accent = Color.FromArgb(10, 132, 255);
-    public static readonly Color AccentFill = Color.FromArgb(10, 111, 214);
-    public static readonly Color AccentFillHover = Color.FromArgb(34, 118, 216);
-    public static readonly Color AccentFillPressed = Color.FromArgb(11, 92, 175);
-    // A dark blue wash, not a pale one - a light tint would glare on this bg.
-    public static readonly Color AccentSoft = Color.FromArgb(22, 46, 76);
+    // dark-theme contrast bug. Accent is Apple's dark-mode purple and is used
+    // where the purple is the *foreground* on a dark surface - the upload
+    // glyph, the progress bar, focus rings. AccentFill is a much deeper purple
+    // used where white text sits *on top* of it; #BF5AF2 only reaches 3.52:1
+    // against white, well below the 4.5:1 body text needs.
+    public static readonly Color Accent = Color.FromArgb(191, 90, 242);
+    public static readonly Color AccentFill = Color.FromArgb(124, 58, 237);
+    public static readonly Color AccentFillHover = Color.FromArgb(132, 71, 240);
+    public static readonly Color AccentFillPressed = Color.FromArgb(109, 40, 217);
+    // A dark purple wash, not a pale one - a light tint would glare on this bg.
+    public static readonly Color AccentSoft = Color.FromArgb(42, 27, 69);
     // Deeper, not lighter. When the drop zone highlights, the card itself turns
     // AccentSoft, so the glyph's disc has to go darker to stay distinct - and
-    // darker also buys the bright blue glyph more contrast, where a lighter
-    // disc would have squeezed it down to 2.9:1.
-    public static readonly Color AccentSoftDeep = Color.FromArgb(12, 26, 44);
+    // darker also buys the bright purple glyph more contrast, where a lighter
+    // disc would squeeze it down instead.
+    public static readonly Color AccentSoftDeep = Color.FromArgb(20, 12, 34);
 
     // Apple's dark system backgrounds: the page sits at #1C1C1E and each level
     // of elevation gets lighter instead of gaining a border.
