@@ -49,6 +49,8 @@ public class MainForm : Form
     public MainForm()
     {
         Text = $"PDF --> XML (BETA) - build {BuildTag}";
+        var appIcon = TryLoadAppIcon();
+        if (appIcon != null) Icon = appIcon;
         Width = 860;
         Height = 580;
         MinimumSize = new Size(640, 440);
@@ -318,6 +320,22 @@ public class MainForm : Form
         chip.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
         chip.Margin = new Padding(0, 6, 22, 0);
         chip.TextAlign = ContentAlignment.MiddleLeft;
+    }
+
+    private static Icon? TryLoadAppIcon()
+    {
+        try
+        {
+            // Pulls the icon straight from the .exe's own embedded resource
+            // (set via <ApplicationIcon> in the .csproj) so the taskbar,
+            // Alt-Tab, and title bar all show the same icon without having
+            // to ship/load a separate .ico file at runtime.
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Bitmap MakeStatusDot(Color color)
