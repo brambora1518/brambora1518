@@ -98,18 +98,27 @@ internal static class UiTheme
         }
     }
 
-    /// <summary>Rounded-rectangle path behind every card, chip and button in the UI.</summary>
+    /// <summary>
+    /// Rounded-rectangle path behind every card, chip and button in the UI.
+    ///
+    /// An oversized radius is clamped to the largest one that fits. An earlier
+    /// version bailed out to a plain rectangle instead, which silently squared
+    /// off the pill buttons: they asked for Height/2 while their bounds were
+    /// Height-1 tall, so the radius overshot by a single pixel and the corners
+    /// disappeared entirely rather than being drawn a pixel tighter.
+    /// </summary>
     public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
     {
-        var diameter = radius * 2;
         var path = new GraphicsPath();
 
-        if (diameter <= 0 || diameter > bounds.Width || diameter > bounds.Height)
+        radius = Math.Min(radius, Math.Min(bounds.Width, bounds.Height) / 2);
+        if (radius <= 0)
         {
             path.AddRectangle(bounds);
             return path;
         }
 
+        var diameter = radius * 2;
         var arc = new Rectangle(bounds.Location, new Size(diameter, diameter));
         path.AddArc(arc, 180, 90);
 

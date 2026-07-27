@@ -110,7 +110,9 @@ internal sealed class AccentButton : Control
         g.Clear(Parent?.BackColor ?? UiTheme.Background);
 
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-        var radius = Math.Max(2, Height / 2);
+        // From rect, not from Height: the path is drawn a pixel inside the
+        // control so the antialiased edge is not clipped.
+        var radius = Math.Max(2, rect.Height / 2);
         using var path = UiTheme.RoundedRect(rect, radius);
 
         Color fill;
