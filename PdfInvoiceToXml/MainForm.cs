@@ -76,7 +76,7 @@ public class MainForm : Form
         var header = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 72,
+            Height = 56,
             BackColor = Color.White,
             Padding = new Padding(24, 0, 24, 0)
         };
@@ -91,7 +91,7 @@ public class MainForm : Form
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
-            Location = new Point(24, 14)
+            Location = new Point(24, 16)
         };
 
         var title = new Label
@@ -125,17 +125,7 @@ public class MainForm : Form
         titleRow.Controls.Add(title);
         titleRow.Controls.Add(badge);
 
-        var subtitle = new Label
-        {
-            AutoSize = true,
-            Text = "Automatický převod PDF faktury do XML",
-            Font = new Font("Segoe UI", 9f),
-            ForeColor = MutedColor,
-            Location = new Point(24, 46)
-        };
-
         header.Controls.Add(titleRow);
-        header.Controls.Add(subtitle);
         return header;
     }
 
