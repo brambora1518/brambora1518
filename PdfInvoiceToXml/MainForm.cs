@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Globalization;
 using System.Text;
 using System.Windows.Forms;
 using System.Xml;
@@ -32,6 +33,11 @@ public class MainForm : Form
     private readonly Label _statusOkChip = new();
     private readonly Label _statusWarnChip = new();
     private readonly Label _statusErrorChip = new();
+
+    private readonly Label _clockLabel = new();
+    // Fully qualified: System.Threading.Timer is in scope via implicit usings,
+    // and only the WinForms one ticks on the UI thread.
+    private readonly System.Windows.Forms.Timer _clock = new();
 
     private readonly AccentButton _pickButton = new();
     private readonly AccentButton _openFolderButton = new();
@@ -77,6 +83,11 @@ public class MainForm : Form
         DragDrop += Form_DragDrop;
         FormClosing += MainForm_FormClosing;
 
+        UpdateClock();
+        _clock.Interval = 1000;
+        _clock.Tick += (_, _) => UpdateClock();
+        _clock.Start();
+
         Log($"Build {BuildTag} — pokud po opravě chyby vidíte v titulku okna starší datum, aplikaci jste nepřekompilovali.", LogKind.Info);
         UpdateStatusBar();
     }
@@ -115,16 +126,12 @@ public class MainForm : Form
             e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1);
         };
 
-        var buildLabel = new Label
-        {
-            Dock = DockStyle.Right,
-            Width = 150,
-            Text = $"build {BuildTag}",
-            Font = UiTheme.Body(8.5f),
-            ForeColor = UiTheme.Muted,
-            TextAlign = ContentAlignment.MiddleRight,
-            BackColor = UiTheme.Surface
-        };
+        _clockLabel.Dock = DockStyle.Right;
+        _clockLabel.Width = 200;
+        _clockLabel.Font = UiTheme.Body(10f);
+        _clockLabel.ForeColor = UiTheme.Muted;
+        _clockLabel.TextAlign = ContentAlignment.MiddleRight;
+        _clockLabel.BackColor = UiTheme.Surface;
 
         var titleRow = new FlowLayoutPanel
         {
@@ -160,7 +167,7 @@ public class MainForm : Form
         titleRow.Controls.Add(badge);
 
         header.Controls.Add(titleRow);
-        header.Controls.Add(buildLabel);
+        header.Controls.Add(_clockLabel);
         return header;
     }
 
@@ -494,8 +501,22 @@ public class MainForm : Form
         _statusChips.Controls.Add(_statusWarnChip);
         _statusChips.Controls.Add(_statusErrorChip);
 
+        var buildLabel = new Label
+        {
+            Dock = DockStyle.Right,
+            Width = 150,
+            Text = $"build {BuildTag}",
+            Font = UiTheme.Body(8.5f),
+            ForeColor = UiTheme.Disabled,
+            TextAlign = ContentAlignment.MiddleRight,
+            BackColor = UiTheme.Background
+        };
+
         statusBar.Controls.Add(_statusIdleLabel);
         statusBar.Controls.Add(_statusChips);
+        // Added last so it claims the right-hand strip before the two
+        // Fill-docked controls take the remainder.
+        statusBar.Controls.Add(buildLabel);
         return statusBar;
     }
 
@@ -572,7 +593,16 @@ public class MainForm : Form
             {
                 if (Directory.Exists(path))
                 {
-                    pdfs.AddRange(Directory.EnumerateFiles(path, "*.pdf", SearchOption.TopDirectoryOnly));
+                    // Subfolders included: invoices are usually filed by month
+                    // or by supplier, and dropping the parent folder should
+                    // not quietly skip everything inside those.
+                    var found = Directory
+                        .EnumerateFiles(path, "*.pdf", SearchOption.AllDirectories)
+                        .ToList();
+
+                    pdfs.AddRange(found);
+                    Log($"Složka {new DirectoryInfo(path).Name}: nalezeno {found.Count} PDF (včetně podsložek).",
+                        LogKind.Info);
                 }
                 else if (path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
@@ -806,6 +836,14 @@ public class MainForm : Form
         UpdateStatusBar();
     }
 
+    /// <summary>
+    /// Numeric date and time. The project builds with InvariantGlobalization,
+    /// so there are no Czech month names to format with - and dd.MM.yyyy is
+    /// the Czech numeric convention anyway.
+    /// </summary>
+    private void UpdateClock() =>
+        _clockLabel.Text = DateTime.Now.ToString("dd.MM.yyyy   HH:mm:ss", CultureInfo.InvariantCulture);
+
     private void UpdateStatusBar()
     {
         var idle = _okCount == 0 && _warnCount == 0 && _errorCount == 0;
@@ -938,6 +976,8 @@ public class MainForm : Form
 
         if (disposing)
         {
+            _clock.Stop();
+            _clock.Dispose();
             _dropTitleFont.Dispose();
             _dropHintFont.Dispose();
             _statusIcons.Dispose();
