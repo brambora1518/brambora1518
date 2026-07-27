@@ -85,10 +85,15 @@ public class MainForm : Form
     {
         base.OnHandleCreated(e);
 
-        // Rounds the window's outer corners and tints the title bar to match
-        // the header, so the caption and the app read as one surface. Windows
-        // 11 only; silently does nothing on Windows 10.
+        // Rounds the window's outer corners and switches the title bar to dark
+        // mode tinted to match the header, so the caption and the app read as
+        // one surface. Rounding is Windows 11 only and silently does nothing
+        // on Windows 10; the dark caption works from Windows 10 1809 on.
         WindowChrome.Apply(Handle, UiTheme.Surface, UiTheme.Text, UiTheme.Border);
+
+        // Has to wait for the handle: the list's scroll bars are drawn by the
+        // theme engine, so setting BackColor alone leaves them bright white.
+        WindowChrome.ApplyDarkControlTheme(_logView);
     }
 
     // ---------------------------------------------------------------- layout
@@ -145,7 +150,7 @@ public class MainForm : Form
             Text = "BETA",
             Font = UiTheme.Body(7.5f, FontStyle.Bold),
             ForeColor = Color.White,
-            BackColor = UiTheme.Accent,
+            BackColor = UiTheme.AccentFill,
             Padding = new Padding(10, 3, 10, 3),
             Margin = new Padding(0, 9, 0, 0)
         };
@@ -265,7 +270,7 @@ public class MainForm : Form
         var circleTop = rect.Y + Math.Max(12f, rect.Height * 0.17f);
         var circleRect = new RectangleF(centerX - diameter / 2f, circleTop, diameter, diameter);
 
-        using (var circleBrush = new SolidBrush(_dropActive ? Color.White : UiTheme.AccentSoft))
+        using (var circleBrush = new SolidBrush(_dropActive ? UiTheme.AccentSoftDeep : UiTheme.AccentSoft))
         {
             g.FillEllipse(circleBrush, circleRect);
         }
@@ -404,6 +409,7 @@ public class MainForm : Form
         _logView.GridLines = false;
         _logView.BorderStyle = BorderStyle.None;
         _logView.BackColor = UiTheme.Surface;
+        _logView.ForeColor = UiTheme.Text;
         // No column headers: the list has an icon, a time and a message, which
         // needs no labelling, and the header band is the single most
         // spreadsheet-looking thing in the window.
@@ -432,7 +438,13 @@ public class MainForm : Form
         var showItem = new ToolStripMenuItem("Zobrazit ve složce", null, (_, _) => ShowSelectedInFolder());
         var copyItem = new ToolStripMenuItem("Kopírovat řádek", null, (_, _) => CopySelectedLine());
 
-        var menu = new ContextMenuStrip { Font = UiTheme.Body() };
+        var menu = new ContextMenuStrip
+        {
+            Font = UiTheme.Body(),
+            BackColor = UiTheme.Surface,
+            ForeColor = UiTheme.Text,
+            Renderer = new DarkMenuRenderer()
+        };
         menu.Items.Add(openItem);
         menu.Items.Add(showItem);
         menu.Items.Add(new ToolStripSeparator());

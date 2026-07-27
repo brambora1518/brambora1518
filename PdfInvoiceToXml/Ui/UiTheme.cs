@@ -7,41 +7,60 @@ namespace PdfInvoiceToXml.Ui;
 /// Single source of truth for the app's colours, fonts, corner radii and the
 /// GDI+ helpers the custom-drawn controls share.
 ///
-/// The palette follows Apple's light-mode system colours rather than the stock
-/// WinForms grey: a near-white page tint with pure white cards floating on it,
-/// hairline separators instead of hard borders, and soft shadows doing the work
-/// that outlines used to. That layering - plus generous padding and large
-/// corner radii - is most of what makes a window read as "designed".
+/// The palette follows Apple's dark-mode system colours rather than the stock
+/// WinForms grey: a near-black page tint with lighter cards floating on it,
+/// hairline separators instead of hard borders, and elevation carried by the
+/// surface getting lighter rather than by outlines. That layering - plus
+/// generous padding and large corner radii - is most of what makes a window
+/// read as "designed".
 /// </summary>
 internal static class UiTheme
 {
-    // Apple system blue, plus the tints used for hover, pressed and fills.
-    public static readonly Color Accent = Color.FromArgb(0, 113, 227);
-    public static readonly Color AccentHover = Color.FromArgb(0, 125, 250);
-    public static readonly Color AccentDark = Color.FromArgb(0, 98, 196);
-    public static readonly Color AccentSoft = Color.FromArgb(232, 241, 253);
+    // The accent exists at two levels, and mixing them up is the classic
+    // dark-theme contrast bug. Accent is Apple's dark-mode blue and is used
+    // where the blue is the *foreground* on a dark surface - the upload glyph,
+    // the progress bar, focus rings. AccentFill is a darker blue used where
+    // white text sits *on top* of the blue; Apple's own #0A84FF only reaches
+    // 3.65:1 against white, which is below the 4.5:1 needed for body text.
+    public static readonly Color Accent = Color.FromArgb(10, 132, 255);
+    public static readonly Color AccentFill = Color.FromArgb(10, 111, 214);
+    public static readonly Color AccentFillHover = Color.FromArgb(34, 118, 216);
+    public static readonly Color AccentFillPressed = Color.FromArgb(11, 92, 175);
+    // A dark blue wash, not a pale one - a light tint would glare on this bg.
+    public static readonly Color AccentSoft = Color.FromArgb(22, 46, 76);
+    // Deeper, not lighter. When the drop zone highlights, the card itself turns
+    // AccentSoft, so the glyph's disc has to go darker to stay distinct - and
+    // darker also buys the bright blue glyph more contrast, where a lighter
+    // disc would have squeezed it down to 2.9:1.
+    public static readonly Color AccentSoftDeep = Color.FromArgb(12, 26, 44);
 
-    // #F5F5F7 is Apple's page tint; cards sit on it in pure white.
-    public static readonly Color Background = Color.FromArgb(245, 245, 247);
-    public static readonly Color Surface = Color.FromArgb(255, 255, 255);
-    public static readonly Color SurfaceHover = Color.FromArgb(247, 247, 249);
-    public static readonly Color Fill = Color.FromArgb(239, 239, 242);
-    public static readonly Color FillHover = Color.FromArgb(232, 232, 236);
-    public static readonly Color Border = Color.FromArgb(229, 229, 231);
-    public static readonly Color Separator = Color.FromArgb(240, 240, 242);
+    // Apple's dark system backgrounds: the page sits at #1C1C1E and each level
+    // of elevation gets lighter instead of gaining a border.
+    public static readonly Color Background = Color.FromArgb(28, 28, 30);
+    public static readonly Color Surface = Color.FromArgb(44, 44, 46);
+    public static readonly Color SurfaceHover = Color.FromArgb(54, 54, 56);
+    public static readonly Color Fill = Color.FromArgb(58, 58, 60);
+    public static readonly Color FillHover = Color.FromArgb(72, 72, 74);
+    public static readonly Color Border = Color.FromArgb(58, 58, 60);
+    public static readonly Color Separator = Color.FromArgb(52, 52, 54);
 
-    public static readonly Color Text = Color.FromArgb(29, 29, 31);
-    public static readonly Color Muted = Color.FromArgb(110, 110, 115);
-    public static readonly Color Disabled = Color.FromArgb(174, 174, 178);
+    public static readonly Color Text = Color.FromArgb(245, 245, 247);
+    public static readonly Color Muted = Color.FromArgb(152, 152, 157);
+    public static readonly Color Disabled = Color.FromArgb(138, 138, 142);
 
-    public static readonly Color Ok = Color.FromArgb(29, 138, 78);
-    public static readonly Color Warn = Color.FromArgb(178, 80, 0);
-    public static readonly Color Error = Color.FromArgb(215, 0, 21);
+    // Apple's dark-mode status colours - lighter and more saturated than their
+    // light-mode counterparts so they stay legible on a dark surface.
+    public static readonly Color Ok = Color.FromArgb(48, 209, 88);
+    public static readonly Color Warn = Color.FromArgb(255, 159, 10);
+    // Lightened from Apple's #FF453A, which only reaches 4.09:1 on the card.
+    public static readonly Color Error = Color.FromArgb(255, 107, 97);
 
-    public static readonly Color OkSoft = Color.FromArgb(227, 247, 234);
-    public static readonly Color WarnSoft = Color.FromArgb(255, 244, 224);
-    public static readonly Color ErrorSoft = Color.FromArgb(255, 233, 233);
-    public static readonly Color MutedSoft = Color.FromArgb(240, 240, 242);
+    public static readonly Color OkSoft = Color.FromArgb(21, 51, 30);
+    public static readonly Color WarnSoft = Color.FromArgb(58, 42, 10);
+    public static readonly Color ErrorSoft = Color.FromArgb(58, 26, 24);
+    // Darker than the other chip fills on purpose: an inactive chip carries
+    // Muted text, which needs the extra contrast the lighter fill denied it.
+    public static readonly Color MutedSoft = Color.FromArgb(44, 44, 46);
 
     public const int CardRadius = 16;
     public const int DropZoneRadius = 18;
@@ -116,7 +135,10 @@ internal static class UiTheme
     {
         for (var i = spread; i >= 1; i--)
         {
-            var alpha = 14 - (i * 12 / spread);
+            // Stronger than a light theme would need: black on a near-black
+            // page barely registers, and without it the cards lose their
+            // grounding now that elevation is carried by surface lightness.
+            var alpha = 28 - (i * 24 / spread);
             if (alpha <= 0) continue;
 
             var ring = Rectangle.Inflate(card, i, i);

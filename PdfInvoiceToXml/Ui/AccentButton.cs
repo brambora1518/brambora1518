@@ -118,12 +118,14 @@ internal sealed class AccentButton : Control
 
         if (!Enabled)
         {
-            fill = Primary ? Color.FromArgb(178, 213, 246) : UiTheme.Fill;
-            textColor = Primary ? Color.White : UiTheme.Disabled;
+            fill = Primary ? UiTheme.AccentSoft : UiTheme.Fill;
+            textColor = UiTheme.Disabled;
         }
         else if (Primary)
         {
-            fill = _pressed ? UiTheme.AccentDark : _hover ? UiTheme.AccentHover : UiTheme.Accent;
+            // AccentFill, not Accent: white body text needs 4.5:1, which
+            // Apple's brighter dark-mode blue does not reach.
+            fill = _pressed ? UiTheme.AccentFillPressed : _hover ? UiTheme.AccentFillHover : UiTheme.AccentFill;
             textColor = Color.White;
         }
         else

@@ -15,6 +15,11 @@ namespace PdfInvoiceToXml.Ui;
 /// </summary>
 internal static class WindowChrome
 {
+    // 19 was the pre-release attribute id, replaced by 20 in build 18985. Both
+    // are set so dark mode also works on the older Windows 10 builds that
+    // support it at all.
+    private const int DwmwaUseImmersiveDarkModeOld = 19;
+    private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaBorderColor = 34;
     private const int DwmwaCaptionColor = 35;
@@ -25,15 +30,45 @@ internal static class WindowChrome
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    /// <summary>Rounds the window's outer corners and tints the caption to match the header.</summary>
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? subAppName, string? subIdList);
+
+    /// <summary>
+    /// Rounds the window's outer corners, switches the caption to dark mode and
+    /// tints it to match the header.
+    /// </summary>
     public static void Apply(IntPtr handle, Color caption, Color captionText, Color border)
     {
         if (handle == IntPtr.Zero) return;
 
+        TrySet(handle, DwmwaUseImmersiveDarkMode, 1);
+        TrySet(handle, DwmwaUseImmersiveDarkModeOld, 1);
         TrySet(handle, DwmwaWindowCornerPreference, DwmwcpRound);
         TrySet(handle, DwmwaCaptionColor, ToColorRef(caption));
         TrySet(handle, DwmwaTextColor, ToColorRef(captionText));
         TrySet(handle, DwmwaBorderColor, ToColorRef(border));
+    }
+
+    /// <summary>
+    /// Switches a common control to the dark visual style. Setting BackColor on
+    /// a ListView leaves its scroll bars stubbornly light, because those are
+    /// drawn by the theme engine rather than by WinForms; this is the only way
+    /// to reach them. Available from Windows 10 1809 onwards.
+    /// </summary>
+    public static void ApplyDarkControlTheme(Control control)
+    {
+        if (!control.IsHandleCreated) return;
+
+        try
+        {
+            SetWindowTheme(control.Handle, "DarkMode_Explorer", null);
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
     }
 
     private static void TrySet(IntPtr handle, int attribute, int value)
