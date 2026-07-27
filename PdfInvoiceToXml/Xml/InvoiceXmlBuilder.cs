@@ -26,6 +26,15 @@ public static class InvoiceXmlBuilder
     private const string DefaultTypeOfVat = "U";
     private const string DefaultVatSource = "TaxableValue";
 
+    /// <summary>
+    /// 0308 is the Czech constant symbol for payments for goods and services.
+    /// Invoices like the 354/26 sample print no constant symbol anywhere on the
+    /// page - the STEREO export still carries one because it comes from the
+    /// accounting system's own settings, not from the document. A symbol the
+    /// parser did find on the page always wins over this default.
+    /// </summary>
+    private const string DefaultConstantSymbol = "0308";
+
     public static XDocument Build(InvoiceData invoice)
     {
         var document = new XElement("Document",
@@ -46,7 +55,9 @@ public static class InvoiceXmlBuilder
                 Text("BankAccount", invoice.BankAccount),
                 Text("BankCode", invoice.BankCode),
                 Text("VariableSymbol", invoice.VariableSymbol),
-                Text("ConstantSymbol", invoice.ConstantSymbol),
+                Text("ConstantSymbol", string.IsNullOrEmpty(invoice.ConstantSymbol)
+                    ? DefaultConstantSymbol
+                    : invoice.ConstantSymbol),
                 Text("CurrencyRate", "1.00"),
                 Text("CurrencyAmount", "1")),
             BuildVatInfo(invoice),
