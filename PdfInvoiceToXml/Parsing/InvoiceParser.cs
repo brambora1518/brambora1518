@@ -17,33 +17,136 @@ namespace PdfInvoiceToXml.Parsing;
 /// </summary>
 public static class InvoiceParser
 {
-    public static InvoiceData Parse(string pdfPath)
+    /// <summary>
+    /// Reads every invoice in the file. A PDF that holds one invoice yields a
+    /// single-item list, which is the overwhelmingly common case; a batch
+    /// printed to one file yields one entry per document.
+    /// </summary>
+    public static List<InvoiceData> ParseAll(string pdfPath)
     {
-        var lines = PdfTextExtractor.ExtractLines(pdfPath);
-        var usedOcr = false;
+        var (lines, usedOcr) = ExtractLines(pdfPath);
 
-        if (lines.Count == 0)
+        var segments = SplitIntoInvoices(lines);
+        if (segments.Count <= 1)
         {
-            // No text layer at all - most likely a scanned/"printed to image" PDF.
-            // Fall back to rendering the page and running OCR over it.
-            var tessDataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
-            if (!File.Exists(Path.Combine(tessDataPath, "ces.traineddata")))
-            {
-                throw new InvalidOperationException(
-                    "V PDF se nenašel žádný text (jde o naskenovaný/obrázkový dokument) a chybí OCR data. " +
-                    "Stáhněte ces.traineddata podle tessdata/README.txt a umístěte ho vedle .exe do složky tessdata.");
-            }
-
-            lines = OcrTextExtractor.ExtractLines(pdfPath, tessDataPath);
-            usedOcr = true;
-
-            if (lines.Count == 0)
-            {
-                throw new InvalidOperationException(
-                    "V PDF se nenašel žádný text ani pomocí OCR - dokument se nepodařilo rozpoznat.");
-            }
+            return new List<InvoiceData> { ParseSegment(lines, usedOcr) };
         }
 
+        var parsed = segments.Select(segment => ParseSegment(segment, usedOcr)).ToList();
+
+        // A page that merely opens with the word FAKTURA - terms and
+        // conditions, a delivery note, a covering letter - would otherwise
+        // become an empty XML of its own. If the split leaves nothing that
+        // looks like a document, treat the file as one invoice after all
+        // rather than emitting nothing.
+        var real = parsed.Where(LooksLikeInvoice).ToList();
+        return real.Count > 0
+            ? real
+            : new List<InvoiceData> { ParseSegment(lines, usedOcr) };
+    }
+
+    private static bool LooksLikeInvoice(InvoiceData invoice) =>
+        !string.IsNullOrEmpty(invoice.DocumentId) || invoice.VatTable.Count > 0;
+
+    private static (List<PdfLine> Lines, bool UsedOcr) ExtractLines(string pdfPath)
+    {
+        var lines = PdfTextExtractor.ExtractLines(pdfPath);
+        if (lines.Count > 0) return (lines, false);
+
+        // No text layer at all - most likely a scanned/"printed to image" PDF.
+        // Fall back to rendering the page and running OCR over it.
+        var tessDataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
+        if (!File.Exists(Path.Combine(tessDataPath, "ces.traineddata")))
+        {
+            throw new InvalidOperationException(
+                "V PDF se nenašel žádný text (jde o naskenovaný/obrázkový dokument) a chybí OCR data. " +
+                "Stáhněte ces.traineddata podle tessdata/README.txt a umístěte ho vedle .exe do složky tessdata.");
+        }
+
+        lines = OcrTextExtractor.ExtractLines(pdfPath, tessDataPath);
+        if (lines.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "V PDF se nenašel žádný text ani pomocí OCR - dokument se nepodařilo rozpoznat.");
+        }
+
+        return (lines, true);
+    }
+
+    // The title line of an invoice, e.g. "FAKTURA - DAŇOVÝ DOKLAD: 354/26".
+    // Anchored to the start of the line on purpose: the "TATO FAKTURA SLOUŽÍ
+    // ZÁROVEŇ JAKO DODACÍ LIST" footer also contains the word, and must not
+    // read as the beginning of a new document.
+    private static readonly Regex InvoiceTitlePattern =
+        new(@"^\s*(FAKTURA|DA[ŇN]OV\S*\s+DOKLAD)\b", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Cuts the document into one chunk per invoice, splitting only at page
+    /// boundaries - a new invoice always starts on a fresh page, while a page
+    /// without a title line is a continuation of the one before it. Erring
+    /// towards too few splits is deliberate: under-splitting produces the
+    /// previous behaviour, over-splitting produces garbage.
+    /// </summary>
+    private static List<List<PdfLine>> SplitIntoInvoices(List<PdfLine> lines)
+    {
+        var segments = new List<List<PdfLine>>();
+
+        foreach (var page in lines.GroupBy(l => l.PageNumber).OrderBy(g => g.Key))
+        {
+            var pageLines = page.ToList();
+            var startsInvoice = pageLines.Any(l => InvoiceTitlePattern.IsMatch(l.Text));
+
+            if (startsInvoice || segments.Count == 0)
+            {
+                segments.Add(new List<PdfLine>());
+            }
+
+            segments[^1].AddRange(pageLines);
+        }
+
+        return MergeRepeatedHeaders(segments);
+    }
+
+    /// <summary>
+    /// Some accounting systems reprint the invoice header on every page, which
+    /// would split a single multi-page document into one "invoice" per page.
+    /// Consecutive chunks carrying the same document number are the same
+    /// invoice, so they are folded back together.
+    /// </summary>
+    private static List<List<PdfLine>> MergeRepeatedHeaders(List<List<PdfLine>> segments)
+    {
+        var merged = new List<List<PdfLine>>();
+        string previousId = "";
+
+        foreach (var segment in segments)
+        {
+            var id = PeekDocumentId(segment);
+
+            if (merged.Count > 0 && id.Length > 0 && id == previousId)
+            {
+                merged[^1].AddRange(segment);
+                continue;
+            }
+
+            merged.Add(segment);
+            previousId = id;
+        }
+
+        return merged;
+    }
+
+    /// <summary>Cheap look at a chunk's document number, without parsing it fully.</summary>
+    private static string PeekDocumentId(List<PdfLine> lines)
+    {
+        var text = string.Join("\n", lines.Take(12).Select(l => l.Text));
+
+        return Match1(text, @"DOKLAD.{0,5}?([\w/\-]+)")
+               ?? Match1(text, @"FAKTURA\s*(?:č\.?|číslo)?.{0,5}?([\w/\-]+)")
+               ?? "";
+    }
+
+    private static InvoiceData ParseSegment(List<PdfLine> lines, bool usedOcr)
+    {
         var itemsHeaderIdx = lines.FindIndex(l =>
             l.Text.Contains("Název", StringComparison.OrdinalIgnoreCase) &&
             l.Text.Contains("žství", StringComparison.OrdinalIgnoreCase));

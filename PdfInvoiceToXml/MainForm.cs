@@ -890,28 +890,27 @@ public class MainForm : Form
         }
     }
 
+    private sealed record InvoiceResult(string XmlPath, int VatRateCount, decimal GrandTotal);
+
     private sealed record ConversionResult(
         string PdfPath,
-        string? XmlPath,
+        IReadOnlyList<InvoiceResult> Invoices,
         bool WasOcr,
-        int VatRateCount,
-        decimal GrandTotal,
         string? Error);
 
     /// <summary>
     /// Runs entirely on a worker thread, so it must not touch any control -
     /// everything it needs to report comes back through the returned record.
+    /// One PDF can hold several invoices, so this writes one XML per document.
     /// </summary>
     private static ConversionResult ConvertInvoice(string pdfPath)
     {
         try
         {
-            var invoice = InvoiceParser.Parse(pdfPath);
-            var xml = InvoiceXmlBuilder.Build(invoice);
+            var invoices = InvoiceParser.ParseAll(pdfPath);
 
-            var outputPath = Path.Combine(
-                Path.GetDirectoryName(pdfPath) ?? ".",
-                Path.GetFileNameWithoutExtension(pdfPath) + ".xml");
+            var directory = Path.GetDirectoryName(pdfPath) ?? ".";
+            var baseName = Path.GetFileNameWithoutExtension(pdfPath);
 
             var settings = new XmlWriterSettings
             {
@@ -920,52 +919,121 @@ public class MainForm : Form
                 Encoding = new UTF8Encoding(false)
             };
 
-            using (var writer = XmlWriter.Create(outputPath, settings))
+            var written = new List<InvoiceResult>();
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (var i = 0; i < invoices.Count; i++)
             {
-                xml.Save(writer);
+                var invoice = invoices[i];
+                var name = BuildOutputName(baseName, invoice.DocumentId, i, invoices.Count, usedNames);
+                var outputPath = Path.Combine(directory, name + ".xml");
+
+                using (var writer = XmlWriter.Create(outputPath, settings))
+                {
+                    InvoiceXmlBuilder.Build(invoice).Save(writer);
+                }
+
+                written.Add(new InvoiceResult(outputPath, invoice.VatTable.Count, invoice.GrandTotal));
             }
 
-            return new ConversionResult(
-                pdfPath, outputPath, invoice.WasOcr, invoice.VatTable.Count, invoice.GrandTotal, null);
+            return new ConversionResult(pdfPath, written, invoices.Any(x => x.WasOcr), null);
         }
         catch (Exception ex)
         {
-            return new ConversionResult(pdfPath, null, false, 0, 0m, ex.Message);
+            return new ConversionResult(pdfPath, Array.Empty<InvoiceResult>(), false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// A single invoice keeps the PDF's own name, so the ordinary case is
+    /// completely unchanged. Several invoices out of one file get the document
+    /// number appended, which is far more use than a running index once the
+    /// files are sitting in a folder together.
+    /// </summary>
+    private static string BuildOutputName(
+        string baseName, string documentId, int index, int total, HashSet<string> used)
+    {
+        var name = baseName;
+
+        if (total > 1)
+        {
+            var suffix = SanitizeForFileName(documentId);
+            name = suffix.Length == 0 ? $"{baseName}_{index + 1}" : $"{baseName}_{suffix}";
+        }
+
+        // Two invoices in one file could carry the same number, and the second
+        // must not overwrite the first.
+        var candidate = name;
+        var counter = 2;
+        while (!used.Add(candidate))
+        {
+            candidate = $"{name}_{counter++}";
+        }
+
+        return candidate;
+    }
+
+    private static string SanitizeForFileName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+
+        // Invoice numbers are written "354/26", and '/' is not a legal file
+        // name character on Windows.
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(value.Trim().Select(c => invalid.Contains(c) ? '-' : c).ToArray());
     }
 
     private void ApplyResult(ConversionResult result)
     {
+        var pdfName = Path.GetFileName(result.PdfPath);
+
         if (result.Error != null)
         {
-            Log($"{Path.GetFileName(result.PdfPath)} — {result.Error}", LogKind.Error);
+            Log($"{pdfName} — {result.Error}", LogKind.Error);
             _errorCount++;
             return;
         }
 
-        Log($"{Path.GetFileName(result.PdfPath)} → {Path.GetFileName(result.XmlPath!)}" +
-            $"  (celkem {result.GrandTotal:0.00} Kč)",
-            LogKind.Ok, result.XmlPath);
-        _okCount++;
+        if (result.Invoices.Count == 0)
+        {
+            Log($"{pdfName} — v souboru se nenašla žádná faktura.", LogKind.Warn);
+            _warnCount++;
+            return;
+        }
 
-        _lastOutputDirectory = Path.GetDirectoryName(result.XmlPath);
-        _openFolderButton.Enabled = _lastOutputDirectory != null;
-
+        // OCR is a property of the whole file, so it is reported once rather
+        // than repeated under every invoice found in it.
         if (result.WasOcr)
         {
-            Log("    POZOR: PDF nemělo textovou vrstvu, data se četla přes OCR — zkontrolujte prosím čísla ručně.",
+            Log($"{pdfName} — PDF nemělo textovou vrstvu, data se četla přes OCR, zkontrolujte prosím čísla ručně.",
                 LogKind.Warn);
             _warnCount++;
         }
 
-        // Every amount in the XML is derived from the VAT recap table, so if
-        // that was not found the output is structurally valid but worthless.
-        if (result.VatRateCount == 0)
+        if (result.Invoices.Count > 1)
         {
-            Log("    POZOR: nenalezena rekapitulace DPH — výsledné XML nemá žádné částky, zkontrolujte fakturu.",
-                LogKind.Warn);
-            _warnCount++;
+            Log($"{pdfName} — nalezeno {result.Invoices.Count} faktur, každá se ukládá do vlastního XML.",
+                LogKind.Info);
         }
+
+        foreach (var invoice in result.Invoices)
+        {
+            Log($"{pdfName} → {Path.GetFileName(invoice.XmlPath)}  (celkem {invoice.GrandTotal:0.00} Kč)",
+                LogKind.Ok, invoice.XmlPath);
+            _okCount++;
+
+            // Every amount in the XML is derived from the VAT recap table, so
+            // without it the output is structurally valid but worthless.
+            if (invoice.VatRateCount == 0)
+            {
+                Log("    POZOR: nenalezena rekapitulace DPH — toto XML nemá žádné částky, zkontrolujte fakturu.",
+                    LogKind.Warn);
+                _warnCount++;
+            }
+        }
+
+        _lastOutputDirectory = Path.GetDirectoryName(result.Invoices[^1].XmlPath);
+        _openFolderButton.Enabled = _lastOutputDirectory != null;
     }
 
     private void SetBusy(bool busy)
