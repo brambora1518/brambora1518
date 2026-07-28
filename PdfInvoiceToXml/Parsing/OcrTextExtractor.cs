@@ -12,6 +12,16 @@ namespace PdfInvoiceToXml.Parsing;
 /// parsing pipeline doesn't need to know whether the text came from the PDF
 /// itself or from OCR.
 ///
+/// Lines come from Tesseract's own layout analysis rather than being
+/// re-derived from the word boxes. Measured on the 354/26 scan, clustering
+/// words by vertical position reconstructed 38 of 53 lines exactly, while
+/// following the engine's text lines gets all 51 - the difference being stray
+/// specks pulled in from the line above or below, which is how
+/// "TATO FAKTURA SLOUŽÍ ZÁROVEŇ JAKO DODACÍ LIST" acquired a stray ":" twice.
+/// Confidence is deliberately not used to filter those out: the specks scored
+/// 0% and 24%, but genuine layout colons on the same page scored 5.8% and
+/// 37.8%, so any threshold that removed the noise removed real content too.
+///
 /// Requires a Tesseract trained-data file (e.g. ces.traineddata) in the
 /// tessdata folder passed in - see tessdata/README.txt.
 /// </summary>
@@ -46,9 +56,19 @@ public static class OcrTextExtractor
             var pageWidthPoints = bitmap.Width * 72.0 / Dpi;
 
             var words = new List<PdfWord>();
+            var lineOfWord = new List<int>();
+            var lineIndex = 0;
+
             iter.Begin();
             do
             {
+                // Checked before the word is read, so a word skipped below
+                // still closes the line it started.
+                if (words.Count > 0 && iter.IsAtBeginningOf(PageIteratorLevel.TextLine))
+                {
+                    lineIndex++;
+                }
+
                 if (!iter.TryGetBoundingBox(PageIteratorLevel.Word, out var box)) continue;
                 var text = iter.GetText(PageIteratorLevel.Word)?.Trim();
                 if (string.IsNullOrEmpty(text)) continue;
@@ -60,9 +80,10 @@ public static class OcrTextExtractor
                     Right = box.X2 * 72.0 / Dpi,
                     Top = pageHeightPoints - box.Y1 * 72.0 / Dpi
                 });
+                lineOfWord.Add(lineIndex);
             } while (iter.Next(PageIteratorLevel.Word));
 
-            lines.AddRange(GroupIntoLines(words, pageIndex + 1, pageWidthPoints));
+            lines.AddRange(BuildLines(words, lineOfWord, pageIndex + 1, pageWidthPoints));
         }
 
         return lines
@@ -71,6 +92,35 @@ public static class OcrTextExtractor
             .ToList();
     }
 
+    private static List<PdfLine> BuildLines(
+        List<PdfWord> words, List<int> lineOfWord, int pageNumber, double pageWidth)
+    {
+        var grouped = words
+            .Select((word, i) => (Word: word, Line: lineOfWord[i]))
+            .GroupBy(x => x.Line)
+            .Select(g => new PdfLine
+            {
+                PageNumber = pageNumber,
+                PageWidth = pageWidth,
+                Top = g.Max(x => x.Word.Top),
+                Words = g.Select(x => x.Word).OrderBy(w => w.Left).ToList()
+            })
+            .ToList();
+
+        // If the iterator never reported a line break, something about the
+        // engine build is not what we expect - a whole page as one line would
+        // wreck every regex downstream, so fall back to the geometric
+        // clustering this used to do unconditionally.
+        return grouped.Count <= 1 && words.Count > 20
+            ? GroupIntoLines(words, pageNumber, pageWidth)
+            : grouped;
+    }
+
+    /// <summary>
+    /// Geometric fallback: clusters words whose vertical positions are close.
+    /// Only used when Tesseract's own line structure is unavailable - it
+    /// cannot tell a speck on the next line apart from a word on this one.
+    /// </summary>
     private static List<PdfLine> GroupIntoLines(List<PdfWord> words, int pageNumber, double pageWidth)
     {
         var result = new List<PdfLine>();
