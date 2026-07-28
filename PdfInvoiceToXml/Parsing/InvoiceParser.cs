@@ -64,8 +64,12 @@ public static class InvoiceParser
             VatDate = FindDate(headerText, @"Datum\s+uskut\S*"),
             DueDate = FindDate(headerText, @"[Ss]platnosti"),
             VariableSymbol = Match1(headerText, @"[Vv]ariabiln\S*\s+symbol.{0,10}?(\d{3,})") ?? "",
+            // Mirrors the variable-symbol pattern above. This was never read at
+            // all before, so ConstantSymbol always came out empty even when the
+            // invoice printed one (the reference export for 354/26 has "0308").
+            ConstantSymbol = Match1(headerText, @"[Kk]onstantn\S*\s+symbol.{0,10}?(\d{3,})") ?? "",
             PaymentType = MapPaymentType(Match1(headerText, @"[ZF]orm\S*\s+[úu]hrady.{0,10}?([\w.]+)")),
-            TextAbove = Match1(fullText, @"(TATO FAKTURA[^\n]*)") ?? "",
+            TextAbove = CleanScanSpecks(Match1(fullText, @"(TATO FAKTURA[^\n]*)") ?? ""),
             WasOcr = usedOcr,
         };
 
@@ -243,6 +247,30 @@ public static class InvoiceParser
     // strips a leading run of stray punctuation OCR sometimes bleeds in from
     // an adjacent line (e.g. a trailing ":" from the label line above).
     private static string TrimLeadingNoise(string s) => Regex.Replace(s.Trim(), @"^[^\p{L}\d]+", "");
+
+    /// <summary>
+    /// Drops characters OCR invented out of dust and specks on a scan. Banner
+    /// lines like "TATO FAKTURA SLOUŽÍ ZÁROVEŇ JAKO DODACÍ LIST" are printed in
+    /// capitals, so a lone lower-case letter or a bare punctuation mark sitting
+    /// between two words is a speck, not part of the sentence - the 354/26 scan
+    /// produced "SLOUŽÍ i ZÁROVEŇ . JAKO" that way. Mixed-case text is left
+    /// alone, since there the same test would eat real words.
+    /// </summary>
+    private static string CleanScanSpecks(string text)
+    {
+        var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0) return "";
+
+        var letters = text.Count(char.IsLetter);
+        var upper = text.Count(char.IsUpper);
+        if (letters == 0 || upper < letters * 0.8) return string.Join(" ", tokens);
+
+        var kept = tokens.Where(t =>
+            t.Any(char.IsLetterOrDigit) &&              // a token of pure punctuation
+            !(t.Length == 1 && char.IsLower(t[0])));    // a single stray lower-case letter
+
+        return string.Join(" ", kept);
+    }
 
     private static List<VatRateSummary> ExtractVatTable(List<PdfLine> lines)
     {

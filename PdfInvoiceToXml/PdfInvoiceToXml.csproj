@@ -9,6 +9,13 @@
     <AssemblyName>PdfInvoiceToXml</AssemblyName>
     <RootNamespace>PdfInvoiceToXml</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>AppIcon.ico</ApplicationIcon>
+    <Product>PDF → XML Converter</Product>
+    <AssemblyTitle>PDF → XML Converter</AssemblyTitle>
+    <Description>Převod PDF faktur do XML pro import do účetního systému</Description>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
