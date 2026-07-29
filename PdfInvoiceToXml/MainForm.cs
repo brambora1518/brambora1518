@@ -18,7 +18,7 @@ public class MainForm : Form
     // (built before a fix landed) is immediately obvious instead of looking
     // like "the fix didn't work" - see the debugging notes for how much time
     // that confusion has cost.
-    private const string BuildTag = "2026-07-27";
+    private const string BuildTag = "2026-07-29";
 
     private enum LogKind { Info, Ok, Warn, Error }
 
@@ -527,10 +527,20 @@ public class MainForm : Form
         _logView.MouseMove += LogView_MouseMove;
         _logView.MouseLeave += (_, _) => SetHoveredLogRow(-1);
 
+        // A ListView is not double buffered, and an owner-drawn one repainting
+        // during a resize is exactly where that shows.
+        UiTheme.EnableDoubleBuffer(_logView);
+
         _logView.AllowDrop = true;
         _logView.DragEnter += Form_DragEnter;
         _logView.DragDrop += Form_DragDrop;
-        _logView.Resize += (_, _) => ResizeLogColumns();
+        _logView.Resize += (_, _) =>
+        {
+            ResizeLogColumns();
+            // Changing a column width repaints only part of the control, which
+            // is not enough once the rows are drawn by hand.
+            _logView.Invalidate();
+        };
         _logView.DoubleClick += (_, _) => OpenSelectedXml();
         _logView.ContextMenuStrip = BuildLogContextMenu();
 
@@ -541,47 +551,70 @@ public class MainForm : Form
         return wrapper;
     }
 
+    /// <summary>
+    /// Draws the whole row - background, status dot and every column - in this
+    /// one handler.
+    ///
+    /// Splitting it across DrawItem and DrawSubItem is the natural way to do
+    /// it and was how this started, but in Details view the two events do not
+    /// reliably both fire while the control is being resized. DrawItem would
+    /// paint the background and DrawSubItem would never follow, leaving blank
+    /// rows that only came back when something forced a full repaint - such as
+    /// selecting one with the mouse.
+    /// </summary>
     private void LogView_DrawItem(object? sender, DrawListViewItemEventArgs e)
     {
+        var g = e.Graphics;
+        var kind = (e.Item?.Tag as LogRow)?.Kind ?? LogKind.Info;
+
+        // e.Bounds can cover only the first column, so the row rectangle is
+        // taken from the control's own width instead.
+        var row = new Rectangle(0, e.Bounds.Top, _logView.ClientSize.Width, e.Bounds.Height);
+
         var selected = (e.State & ListViewItemStates.Selected) != 0;
         var background = selected ? UiTheme.AccentSoft
             : e.ItemIndex == _hoveredLogRow ? UiTheme.SurfaceHover
             : UiTheme.Surface;
 
-        using var brush = new SolidBrush(background);
-        e.Graphics.FillRectangle(brush, e.Bounds);
-    }
-
-    private void LogView_DrawSubItem(object? sender, DrawListViewSubItemEventArgs e)
-    {
-        var g = e.Graphics;
-        var kind = (e.Item?.Tag as LogRow)?.Kind ?? LogKind.Info;
-
-        if (e.ColumnIndex == 0)
+        using (var brush = new SolidBrush(background))
         {
-            // For the first column e.Bounds can span the whole row, so the dot
-            // is placed from the row's left edge rather than from the cell.
-            const int size = 8;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var dot = new SolidBrush(StatusColor(kind));
-            g.FillEllipse(dot, e.Bounds.Left + 11, e.Bounds.Top + (e.Bounds.Height - size) / 2, size, size);
-            return;
+            g.FillRectangle(brush, row);
         }
 
+        const int dotSize = 8;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var dot = new SolidBrush(StatusColor(kind)))
+        {
+            g.FillEllipse(dot, row.Left + 11, row.Top + (row.Height - dotSize) / 2f, dotSize, dotSize);
+        }
+
+        if (e.Item == null) return;
+
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        const TextFormatFlags flags =
+            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
 
-        // Timestamps are metadata and stay muted whatever the row's status is;
-        // only the message itself carries the colour.
-        var color = e.ColumnIndex == 1 ? UiTheme.Muted : StatusTextColor(kind);
+        // Column 0 holds the dot, so text starts at column 1. Timestamps are
+        // metadata and stay muted whatever the row's status is; only the
+        // message itself carries the colour.
+        var x = _logView.Columns[0].Width;
+        for (var column = 1; column < _logView.Columns.Count && column < e.Item.SubItems.Count; column++)
+        {
+            var width = _logView.Columns[column].Width;
+            var cell = new Rectangle(x + 2, row.Top, Math.Max(0, width - 6), row.Height);
+            var color = column == 1 ? UiTheme.Muted : StatusTextColor(kind);
 
-        var bounds = e.Bounds;
-        bounds.X += 2;
-        bounds.Width -= 6;
-
-        TextRenderer.DrawText(
-            g, e.SubItem?.Text ?? "", _logFont, bounds, color,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(g, e.Item.SubItems[column].Text, _logFont, cell, color, flags);
+            x += width;
+        }
     }
+
+    /// <summary>
+    /// Everything is painted in <see cref="LogView_DrawItem"/>; this only has
+    /// to stop the default cell rendering from covering it.
+    /// </summary>
+    private static void LogView_DrawSubItem(object? sender, DrawListViewSubItemEventArgs e) =>
+        e.DrawDefault = false;
 
     private void LogView_MouseMove(object? sender, MouseEventArgs e) =>
         SetHoveredLogRow(_logView.GetItemAt(e.X, e.Y)?.Index ?? -1);
@@ -599,7 +632,11 @@ public class MainForm : Form
     private void InvalidateLogRow(int index)
     {
         if (index < 0 || index >= _logView.Items.Count) return;
-        _logView.Invalidate(_logView.Items[index].Bounds);
+
+        // Full width: Item.Bounds can be just the first column, and repainting
+        // only that would leave the rest of the row on the old background.
+        var bounds = _logView.Items[index].Bounds;
+        _logView.Invalidate(new Rectangle(0, bounds.Top, _logView.ClientSize.Width, bounds.Height));
     }
 
     private static Color StatusColor(LogKind kind) => kind switch
