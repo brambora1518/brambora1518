@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "aurora",
+  "version": "${version}",
+  "name": "Aurora Client",
+  "description": "Modular utility client for Minecraft: combat, movement, render and world automation modules with an in-game ClickGUI.",
+  "authors": [],
+  "contact": {},
+  "license": "ARR",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "gg.aurora.client.Aurora"
+    ]
+  },
+  "mixins": [
+    "aurora.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.8",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
