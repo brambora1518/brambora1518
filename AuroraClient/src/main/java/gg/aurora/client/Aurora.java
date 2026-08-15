@@ -1,5 +1,6 @@
 package gg.aurora.client;
 
+import gg.aurora.client.command.CommandManager;
 import gg.aurora.client.config.ConfigManager;
 import gg.aurora.client.event.EventBridge;
 import gg.aurora.client.event.EventBus;
@@ -30,7 +31,10 @@ import gg.aurora.client.module.modules.render.NoFog;
 import gg.aurora.client.module.modules.render.PearlPrediction;
 import gg.aurora.client.module.modules.render.PlayerEsp;
 import gg.aurora.client.module.modules.render.Zoom;
+import gg.aurora.client.module.modules.world.AutoBuilder;
+import gg.aurora.client.module.modules.world.AutoMiner;
 import gg.aurora.client.module.modules.world.ChunkFinder;
+import gg.aurora.client.module.modules.world.SchematicBuilder;
 import gg.aurora.client.ui.Theme;
 import net.fabricmc.api.ClientModInitializer;
 import org.slf4j.Logger;
@@ -55,6 +59,7 @@ public final class Aurora implements ClientModInitializer {
 
     private static ModuleManager modules;
     private static ConfigManager config;
+    private static CommandManager commands;
     private static Theme theme;
 
     @Override
@@ -94,12 +99,16 @@ public final class Aurora implements ClientModInitializer {
                 new AutoRefill(),
                 new FastPlace(),
                 // World
+                new AutoBuilder(),
+                new AutoMiner(),
                 new ChunkFinder(),
+                new SchematicBuilder(),
                 // Client
                 new ClickGuiModule(),
                 new HudModule()
         );
 
+        commands = new CommandManager();
         EventBridge.install();
 
         config = new ConfigManager(modules, theme);
@@ -114,6 +123,10 @@ public final class Aurora implements ClientModInitializer {
 
     public static ModuleManager modules() {
         return modules;
+    }
+
+    public static CommandManager commands() {
+        return commands;
     }
 
     public static ConfigManager config() {

@@ -31,8 +31,10 @@ gg.aurora.client
 │   └── modules/            the modules themselves, one package per category
 ├── setting/                Setting types: bool, int, double, enum, colour, keybind
 ├── config/                 profile load/save
+├── command/                chat commands
+├── schematic/              format parsers and the in-memory structure
 ├── ui/                     ClickGUI, theme
-├── util/                   world-space render helpers
+├── util/                   rotation, ballistics, inventory, render helpers
 └── mixin/                  the few hooks Fabric does not expose
 ```
 
@@ -68,25 +70,83 @@ disabling costs nothing and is safe to do from inside a handler.
 
 | Category | Module | What it does |
 |---|---|---|
+| Combat | AimAssist | Steers aim by a capped turn per tick inside an FOV cone |
 | Combat | AutoClicker | Repeats the held mouse button at a randomised CPS |
+| Combat | AutoCrystal | Places and detonates end crystals, scored by blast damage |
+| Combat | AutoSpear | Charges and throws a trident, correcting for drop |
 | Combat | AutoTotem | Keeps a totem in the off-hand |
+| Combat | BowAimbot | Solves pitch for the current draw, leads moving targets |
+| Combat | MaceHit | Times a mace strike for the end of a fall |
 | Combat | Reach | Raises the entity/block interaction range attributes |
+| Combat | SafeAnchor | Places, charges and triggers a respawn anchor |
+| Combat | ShieldBreaker | Swaps to an axe to disable a raised shield |
 | Combat | TriggerBot | Attacks the entity already under the crosshair |
+| Combat | WindCharge | Fires wind charges for height or knockback |
+| Movement | NoSlow | Replaces the item-use movement penalty |
 | Movement | Sprint | Sprints without holding the key |
 | Movement | Step | Raises the step-height attribute |
+| Render | Freecam | Detaches the camera; the body stays put |
 | Render | Fullbright | Drives gamma past the options-screen limit |
 | Render | Hitboxes | Outlines entity collision boxes |
+| Render | NoFog | Scales the view distance the fog is derived from |
+| Render | PearlPrediction | Ray-traced arc and landing point for throwables |
 | Render | PlayerESP | Boxes other players, team-coloured |
 | Render | Zoom | Eased field-of-view zoom |
 | Player | AutoRefill | Tops up a low hotbar stack from the inventory |
 | Player | FastPlace | Shortens the repeat delay on right-click |
+| World | AutoBuilder | Fills a floor/wall/perimeter/nest with the held block |
+| World | AutoMiner | Clears a sphere, cube or layer, nearest first |
 | World | ChunkFinder | Marks chunks as the server streams them in |
+| World | SchematicBuilder | Places a `.litematic`, `.schem` or `.nbt` structure |
 | Client | ClickGUI | Opens the module browser (default: Right Shift) |
 | Client | HUD | Module list, watermark, coordinates, FPS |
 
 `Reach` and `Step` drive vanilla synced attributes. The server checks both on its own side, so
 against a server that has not granted the same values the change is simply refused — they do what
 they say on a world or server you control, and nothing on one you do not.
+
+Nothing here is written to avoid server-side detection, and none of it is tuned against an
+anti-cheat. Modules act on the tick they decide to act; timings are the ones the feature needs,
+not ones shaped to look like anything.
+
+## Commands
+
+Chat messages starting with `.` are intercepted before they leave the client, so a mistyped
+command never reaches the server.
+
+```
+.help                       list commands
+.toggle <module>            turn a module on or off
+.bind <module> <key|none>   rebind a module
+.list [category]            list modules, enabled ones highlighted
+.schem list                 list files in config/aurora/schematics/
+.schem load <file>          load a schematic
+.schem materials            what the current build still needs
+.profile save|load <name>   manage config profiles
+```
+
+## Schematics
+
+Put `.litematic`, `.schem` or `.nbt` files in `.minecraft/config/aurora/schematics/`, load one
+with `.schem load <file>`, stand where you want it, and enable SchematicBuilder — the structure is
+anchored where you were standing when you turned it on.
+
+All three formats are gzipped NBT and are handled directly:
+
+- **`.nbt`** (vanilla structure block) — palette plus an explicit position list.
+- **`.schem`** (Sponge v2 and v3) — palette plus varint-packed indices in Y-Z-X order. v3's
+  nesting under `Schematic`/`Blocks` and v2's flat layout are both accepted.
+- **`.litematic`** (Litematica) — one or more regions, each a palette plus a packed long array.
+  Litematica's bit array lets entries straddle two longs, unlike the non-spanning layout Minecraft
+  itself moved to in 1.16, so it has its own unpacker; reading it with the vanilla one gives
+  subtly wrong blocks wherever an entry crosses a boundary.
+
+Placement is ordered bottom layer first, then outward from the structure's centre — a block with
+nothing under it has no face to click against and the server rejects the placement. Blocks you
+have no item for are skipped rather than stalling the queue, so a partial inventory gives a
+partial build. `.schem materials` reports what is still outstanding.
+
+Structures over 8 million blocks are refused at load rather than filling the heap.
 
 ## Config
 
