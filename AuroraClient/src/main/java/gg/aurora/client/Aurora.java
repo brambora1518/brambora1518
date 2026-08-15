@@ -6,16 +6,28 @@ import gg.aurora.client.event.EventBus;
 import gg.aurora.client.module.ModuleManager;
 import gg.aurora.client.module.modules.client.ClickGuiModule;
 import gg.aurora.client.module.modules.client.HudModule;
+import gg.aurora.client.module.modules.combat.AimAssist;
 import gg.aurora.client.module.modules.combat.AutoClicker;
+import gg.aurora.client.module.modules.combat.AutoCrystal;
+import gg.aurora.client.module.modules.combat.AutoShieldBreaker;
+import gg.aurora.client.module.modules.combat.AutoSpear;
 import gg.aurora.client.module.modules.combat.AutoTotem;
+import gg.aurora.client.module.modules.combat.AutoWindCharge;
+import gg.aurora.client.module.modules.combat.BowAimbot;
+import gg.aurora.client.module.modules.combat.MaceHit;
 import gg.aurora.client.module.modules.combat.Reach;
+import gg.aurora.client.module.modules.combat.SafeAnchor;
 import gg.aurora.client.module.modules.combat.TriggerBot;
+import gg.aurora.client.module.modules.movement.NoSlow;
 import gg.aurora.client.module.modules.movement.Sprint;
 import gg.aurora.client.module.modules.movement.Step;
 import gg.aurora.client.module.modules.player.AutoRefill;
 import gg.aurora.client.module.modules.player.FastPlace;
+import gg.aurora.client.module.modules.render.Freecam;
 import gg.aurora.client.module.modules.render.Fullbright;
 import gg.aurora.client.module.modules.render.Hitboxes;
+import gg.aurora.client.module.modules.render.NoFog;
+import gg.aurora.client.module.modules.render.PearlPrediction;
 import gg.aurora.client.module.modules.render.PlayerEsp;
 import gg.aurora.client.module.modules.render.Zoom;
 import gg.aurora.client.module.modules.world.ChunkFinder;
@@ -54,16 +66,28 @@ public final class Aurora implements ClientModInitializer {
 
         modules.register(
                 // Combat
+                new AimAssist(),
                 new AutoClicker(),
+                new AutoCrystal(),
+                new AutoShieldBreaker(),
+                new AutoSpear(),
                 new AutoTotem(),
+                new AutoWindCharge(),
+                new BowAimbot(),
+                new MaceHit(),
                 new Reach(),
+                new SafeAnchor(),
                 new TriggerBot(),
                 // Movement
+                new NoSlow(),
                 new Sprint(),
                 new Step(),
                 // Render
+                new Freecam(),
                 new Fullbright(),
                 new Hitboxes(),
+                new NoFog(),
+                new PearlPrediction(),
                 new PlayerEsp(),
                 new Zoom(),
                 // Player
